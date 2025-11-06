@@ -1,16 +1,15 @@
 [project]
 name = "collabsort-agent"
 version = "0.1.0"
-description = "A cognitive agent for a collaborative sorting task"
+description = "An agent for a collaborative sorting task"
 readme = "README.md"
 authors = [
     { name = "Baptiste Pesquet", email = "bpesquet@gmail.com" }
 ]
 requires-python = ">=3.12"
-dependencies = []
-
-[project.scripts]
-collabsort-agent = "collabsort_agent:main"
+dependencies = [
+    "gym-collabsort",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -20,3 +19,6 @@ build-backend = "hatchling.build"
 dev = [
     "pytest>=8.4.2",
 ]
+
+[tool.uv.sources]
+gym-collabsort = { path = "../gym-collabsort", editable = true }
