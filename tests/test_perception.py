@@ -18,10 +18,12 @@ def test_perceiver() -> None:
     env = gym.make("CollabSort-v0", config=EnvConfig(n_objects=1))
     sample_obs, _ = env.reset()
 
+    # Create perceiver
     perceiver = Perceiver(
         config=PerceptionConfig(),
         treadmill_rows=[env_config.upper_treadmill_row, env_config.lower_treadmill_row],
     )
+
     sensory_state = perceiver.get_sensory_state(obs=sample_obs)
 
     # Check that sensory state is a vector with the expected number of features:

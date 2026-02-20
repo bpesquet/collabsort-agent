@@ -41,7 +41,7 @@ class Perceiver:
         state_features.extend([robot_row, robot_col])
 
         # Board objects features
-        objects: tuple[dict] = obs["available_objects"]
+        objects: tuple[dict] = obs["moving_objects"]
         perceived_cols = [
             agent_col + col for col in range(self.config.n_perceived_cols)
         ]

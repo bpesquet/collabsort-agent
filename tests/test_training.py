@@ -20,6 +20,6 @@ def test_random_agent() -> None:
             perception=PerceptionConfig(),
             memory=MemoryConfig(),
             # epsilon = 1 => always explore randomly
-            learning=LearningConfig(epsilon=1),
+            learning=LearningConfig(beta=1),
         )
     )
