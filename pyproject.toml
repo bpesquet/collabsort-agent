@@ -9,6 +9,9 @@ authors = [
 requires-python = ">=3.12"
 dependencies = [
     "gym-collabsort",
+    # Pinpoint last PyTorch version with MPS support for macOS Monterey.
+    # Feel free to upgrade to a more recent version if your environment supports it
+    "torch==2.4.1",
     "tyro>=1.0.6",
 ]
 
@@ -19,7 +22,16 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
 ]
 
 [tool.uv.sources]
 gym-collabsort = { path = "../gym-collabsort", editable = true }
+
+[tool.ruff.lint]
+# Enhance checking. See https://docs.astral.sh/ruff/rules/#flake8-bugbear-b for details
+extend-select = ["B"]
+
+[tool.pytest.ini_options]
+# Add code coverage reporting
+addopts = "--cov=collabsort_agent --cov-report=term-missing"

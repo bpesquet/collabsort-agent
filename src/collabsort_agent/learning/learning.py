@@ -6,8 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
 
-from gym_collabsort.config import Action
-from gymnasium import Env
+import numpy as np
 
 
 @dataclass
@@ -20,12 +19,13 @@ class Config:
     # Exploration/exploitation threshold for epsilon-greedy algorithms
     epsilon: float = 0.1
 
+    # Learning rate for gradient descent
+    lr: float = 1e-3
+
 
 class LearningAlgorithm(ABC):
     """Abstract base class for learning algorithms"""
 
     @abstractmethod
-    def select_action(self, env: Env) -> Action:
+    def choose_action(self, state: np.ndarray) -> int:
         """Select an action to perform"""
-
-        pass
