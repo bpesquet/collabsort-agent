@@ -3,8 +3,10 @@ Unit test for learning.
 """
 
 import math
+import time
 
 import numpy as np
+from torch.utils.tensorboard.writer import SummaryWriter
 
 from collabsort_agent.learning import Config as LearningConfig
 from collabsort_agent.learning.dqn import DQN
@@ -18,7 +20,10 @@ def test_dqn() -> None:
     n_actions = 4
 
     dqn = DQN(
-        config=LearningConfig(), state_size=len(initial_state), n_actions=n_actions
+        config=LearningConfig(),
+        state_size=len(initial_state),
+        n_actions=n_actions,
+        logger=SummaryWriter(log_dir=f"runs/test_dqn_{int(time.time())}"),
     )
 
     action = dqn.choose_action(state=initial_state)

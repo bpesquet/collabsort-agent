@@ -7,11 +7,16 @@ authors = [
     { name = "Baptiste Pesquet", email = "bpesquet@gmail.com" }
 ]
 requires-python = ">=3.12"
+# - Pinpointing PyTorch to last version with MPS support for macOS Monterey.
+# Feel free to upgrade to a more recent version if your environment supports it.
+# - Downgrading setuptools because TensorBoard 2.20 still relies on pkg_resources, which was removed from Python 3.12+:
+# https://github.com/tensorflow/tensorboard/issues/7003
 dependencies = [
     "gym-collabsort",
-    # Pinpoint last PyTorch version with MPS support for macOS Monterey.
-    # Feel free to upgrade to a more recent version if your environment supports it
+    "setuptools<=81",
+    "tensorboard>=2.20.0",
     "torch==2.4.1",
+    "tqdm>=4.67.3",
     "tyro>=1.0.6",
 ]
 
@@ -35,3 +40,5 @@ extend-select = ["B"]
 [tool.pytest.ini_options]
 # Add code coverage reporting
 addopts = "--cov=collabsort_agent --cov-report=term-missing"
+# Until TensorBoard removes reliance on pkg_resources, which was removed from Python 3.12+:
+filterwarnings = ["ignore::UserWarning"]

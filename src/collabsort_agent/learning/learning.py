@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 import numpy as np
+from torch.utils.tensorboard.writer import SummaryWriter
 
 
 @dataclass
@@ -35,6 +36,10 @@ class Config:
 class LearningAlgorithm(ABC):
     """Abstract base class for learning algorithms"""
 
+    def __init__(self, logger: SummaryWriter) -> None:
+        # TensorBoard writer for logging
+        self.logger = logger
+
     @abstractmethod
     def choose_action(self, state: np.ndarray) -> int:
         """Select an action to perform"""
@@ -48,7 +53,7 @@ class LearningAlgorithm(ABC):
         next_state: np.ndarray,
         done: bool = False,
     ) -> None:
-        """Store a transition for later learning"""
+        """Store a state transition for later learning"""
 
     @abstractmethod
     def learn(self) -> None:

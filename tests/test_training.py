@@ -16,10 +16,12 @@ def test_random_agent() -> None:
 
     train(
         config=TrainingConfig(
-            env=EnvConfig(n_objects=100),
+            env=EnvConfig(),
             perception=PerceptionConfig(),
             memory=MemoryConfig(),
             # epsilon = 1 => always explore randomly
             learning=LearningConfig(beta=1),
+            n_episodes=10,
+            n_steps_episode=100,
         )
     )

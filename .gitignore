@@ -1,8 +1,8 @@
 # macOS folder files
 .DS_Store
 
-# Test coverage files
-.coverage*
+# Runs directory
+runs/
 
 # Python-generated files
 __pycache__/

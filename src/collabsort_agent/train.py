@@ -2,13 +2,15 @@
 Train an agent.
 """
 
+import time
 from dataclasses import dataclass
 
 import gymnasium as gym
 import tyro
 from gym_collabsort.config import Action
 from gym_collabsort.config import Config as EnvConfig
-from gym_collabsort.envs.env import RenderMode
+from torch.utils.tensorboard.writer import SummaryWriter
+from tqdm import trange
 
 from collabsort_agent.agent import Agent
 from collabsort_agent.learning import Config as LearningConfig
@@ -35,11 +37,14 @@ class Config:
     # Learning configuration
     learning: LearningConfig
 
-    # Environment rendering mode
-    render_mode: RenderMode = RenderMode.NONE
+    # Number of training episodes
+    n_episodes: int = 50
+
+    # Maximal number of steps in an episode
+    n_steps_episode: int = 1000
 
 
-def create_agent(config: Config, sample_obs: dict) -> Agent:
+def create_agent(config: Config, sample_obs: dict, logger: SummaryWriter) -> Agent:
     """Create an agent with a specific configuration"""
 
     # Initialize perception
@@ -66,6 +71,7 @@ def create_agent(config: Config, sample_obs: dict) -> Agent:
             config=config.learning,
             state_size=extended_state_size,
             n_actions=n_actions,
+            logger=logger,
         )
 
     return Agent(perceiver=perceiver, memory=memory, learner=learner)
@@ -74,27 +80,59 @@ def create_agent(config: Config, sample_obs: dict) -> Agent:
 def train(config: Config) -> None:
     """Train an agent"""
 
+    # Initialize logging
+    run_name: str = f"train_{config.learning.algorithm}_{int(time.time())}"
+    logger = SummaryWriter(f"runs/{run_name}")
+
     # Initialize environment
-    env = gym.make("CollabSort-v0", render_mode=config.render_mode, config=config.env)
-    obs, _ = env.reset()
+    env = gym.make("CollabSort-v0", config=config.env)
 
     # Create agent
-    agent = create_agent(config=config, sample_obs=obs)
+    agent = create_agent(
+        config=config, sample_obs=env.observation_space.sample(), logger=logger
+    )
 
-    # Training loop
-    ep_over = False
-    while not ep_over:
-        # Agent chooses an action
-        action: Action = agent.act(obs=obs)
+    for episode in trange(config.n_episodes, desc="Training progress"):
+        # Reset environment and metrics for new episode
+        obs, _ = env.reset()
+        ep_reward: float = 0.0
+        ep_collisions: int = 0
+        ep_collected_objects: int = 0
+        ep_step: int = 0
+        ep_over: bool = False
 
-        # Take action and observe result
-        next_obs, reward, terminated, truncated, _ = env.step(action=action)
+        # Training loop
+        while not ep_over:
+            # Agent chooses an action
+            action: Action = agent.act(obs=obs)
 
-        # TODO Learn from this experience
+            # Take action and observe result
+            next_obs, reward, terminated, truncated, info = env.step(action=action)
 
-        # Move to next state
-        ep_over = terminated or truncated
-        obs = next_obs
+            # TODO Learn from this experience
+
+            # Move to next state
+            obs = next_obs
+
+            # Update episode metrics
+            ep_reward += float(reward)
+            ep_collisions += info["n_collisions"]
+            ep_collected_objects += info["n_placed_objects"]
+            ep_step += 1
+            ep_over = terminated or truncated or ep_step >= config.n_steps_episode
+
+        # Log episode metrics
+        logger.add_scalar(
+            tag="training/reward", scalar_value=ep_reward, global_step=episode
+        )
+        logger.add_scalar(
+            tag="training/collisions", scalar_value=ep_collisions, global_step=episode
+        )
+        logger.add_scalar(
+            tag="training/collected objects",
+            scalar_value=ep_collected_objects,
+            global_step=episode,
+        )
 
     env.close()
 

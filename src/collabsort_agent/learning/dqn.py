@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
+from torch.utils.tensorboard.writer import SummaryWriter
 
 from collabsort_agent.learning.learning import Config as LearningConfig
 from collabsort_agent.learning.learning import LearningAlgorithm
@@ -57,7 +58,15 @@ class QNetwork(nn.Module):
 class DQN(LearningAlgorithm):
     """Deep Q-Learning algorithm"""
 
-    def __init__(self, config: LearningConfig, state_size: int, n_actions: int) -> None:
+    def __init__(
+        self,
+        config: LearningConfig,
+        state_size: int,
+        n_actions: int,
+        logger: SummaryWriter,
+    ) -> None:
+        super().__init__(logger=logger)
+
         self.config = config
         self.n_actions = n_actions
 
@@ -65,11 +74,22 @@ class DQN(LearningAlgorithm):
         self.step = 1
 
         self.device = get_device()
-        self.model = QNetwork(input_size=state_size, output_size=n_actions).to(
+
+        # Create Q-network
+        self.q_network = QNetwork(input_size=state_size, output_size=n_actions).to(
             self.device
         )
-        self.optimizer = optim.Adam(params=self.model.parameters(), lr=self.config.lr)
         self.loss_fn = nn.MSELoss()
+        self.optimizer = optim.Adam(
+            params=self.q_network.parameters(), lr=self.config.lr
+        )
+
+        # Create target network
+        self.target_network = QNetwork(input_size=state_size, output_size=n_actions).to(
+            self.device
+        )
+        self.target_network.load_state_dict(self.q_network.state_dict())
+
         self.replay_buffer = deque(maxlen=self.config.replay_buffer_size)
 
     @property
@@ -87,8 +107,8 @@ class DQN(LearningAlgorithm):
         # With probability (1-epsilon): exploit (greedily choose the best known action)
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            q_values = self.model(state_tensor).cpu().numpy().flatten()
-        return int(np.argmax(q_values))
+            q_values = self.q_network(state_tensor)
+        return torch.argmax(q_values, dim=1).cpu().numpy()
 
     def store_transition(
         self,
@@ -107,9 +127,11 @@ class DQN(LearningAlgorithm):
         if len(self.replay_buffer) < self.config.batch_size:
             return
 
+        # Sample a batch from replay buffer
         batch = random.sample(self.replay_buffer, self.config.batch_size)
         states, actions, rewards, next_states, dones = zip(*batch, strict=True)
 
+        # Convert batch data to PyTorch tensors
         states = torch.FloatTensor(np.array(states)).to(self.device)
         actions = torch.LongTensor(actions).unsqueeze(1).to(self.device)
         rewards = torch.FloatTensor(rewards).to(self.device)
@@ -120,11 +142,11 @@ class DQN(LearningAlgorithm):
         actions = torch.clamp(actions, 0, self.n_actions - 1)
 
         # Q(s, a)
-        q_values = self.model(states).gather(1, actions).squeeze(1)
+        q_values = self.q_network(states).gather(1, actions).squeeze(1)
 
         # Q_target = r + γ * max_a' Q(s', a') * (1 - done)
         with torch.no_grad():
-            q_next = self.model(next_states).max(1)[0]
+            q_next = self.q_network(next_states).max(1)[0]
             q_target = rewards + self.config.gamma * q_next * (1 - dones)
 
         loss = self.loss_fn(q_values, q_target)
@@ -132,3 +154,9 @@ class DQN(LearningAlgorithm):
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
+
+    def _decay(self, epsilon: float) -> float:
+        """Decay exploration/exploitation threshold"""
+
+        # TODO Decay epsilon
+        return epsilon
