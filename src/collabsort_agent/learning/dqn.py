@@ -2,10 +2,8 @@
 Deep Q-Learning algorithm.
 """
 
-import math
 import random
 from collections import deque
-from typing import Tuple
 
 import numpy as np
 import torch
@@ -13,6 +11,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard.writer import SummaryWriter
 
+from collabsort_agent.learning.exploration_decay import ExplorationDecay
 from collabsort_agent.learning.learning import Config as LearningConfig
 from collabsort_agent.learning.learning import LearningAlgorithm
 
@@ -36,7 +35,7 @@ class QNetwork(nn.Module):
         self,
         input_size: int,
         output_size: int,
-        hidden_sizes: Tuple[int, int] = (100, 100),
+        hidden_sizes: tuple = (100, 100),
     ) -> None:
         super().__init__()
 
@@ -61,21 +60,19 @@ class DQN(LearningAlgorithm):
     def __init__(
         self,
         config: LearningConfig,
+        exploration_decay: ExplorationDecay,
         state_size: int,
         n_actions: int,
-        logger: SummaryWriter,
     ) -> None:
-        super().__init__(logger=logger)
+        super().__init__(config=config)
 
         self.config = config
+        self.exploration_decay = exploration_decay
         self.n_actions = n_actions
-
-        # Episode step (used for epsilon decay)
-        self.step = 1
 
         self.device = get_device()
 
-        # Create Q-network
+        # Create Q-network for estimating actions values
         self.q_network = QNetwork(input_size=state_size, output_size=n_actions).to(
             self.device
         )
@@ -84,22 +81,19 @@ class DQN(LearningAlgorithm):
             params=self.q_network.parameters(), lr=self.config.lr
         )
 
-        # Create target network
+        # Create target network with fixed parameters (useful to stabilize training)
         self.target_network = QNetwork(input_size=state_size, output_size=n_actions).to(
             self.device
         )
         self.target_network.load_state_dict(self.q_network.state_dict())
 
+        # Create replay buffer for training the Q-network
         self.replay_buffer = deque(maxlen=self.config.replay_buffer_size)
 
-    @property
-    def epsilon(self) -> float:
-        """Exploration/exploitation threshold"""
+    def choose_action(self, state: np.ndarray, training_step: int) -> int:
+        # Update exploration probability
+        self.epsilon = self.exploration_decay.get_epsilon(training_step=training_step)
 
-        # Exponential decay: epsilon = beta^t
-        return math.pow(self.config.beta, self.step)
-
-    def choose_action(self, state: np.ndarray) -> int:
         # With probability epsilon: explore (choose a random action)
         if np.random.random() < self.epsilon:
             return random.randint(0, self.n_actions - 1)
@@ -108,6 +102,7 @@ class DQN(LearningAlgorithm):
         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
         with torch.no_grad():
             q_values = self.q_network(state_tensor)
+
         return torch.argmax(q_values, dim=1).cpu().numpy()
 
     def store_transition(
@@ -122,12 +117,10 @@ class DQN(LearningAlgorithm):
         self.replay_buffer.append((state, action, reward, next_state, done))
 
     def learn(self) -> None:
-        self.step += 1
-
         if len(self.replay_buffer) < self.config.batch_size:
             return
 
-        # Sample a batch from replay buffer
+        # Sample a batch of past experiences from replay buffer
         batch = random.sample(self.replay_buffer, self.config.batch_size)
         states, actions, rewards, next_states, dones = zip(*batch, strict=True)
 
@@ -141,7 +134,7 @@ class DQN(LearningAlgorithm):
         # Clamp actions to valid range
         actions = torch.clamp(actions, 0, self.n_actions - 1)
 
-        # Q(s, a)
+        # Compute action values for the batch data
         q_values = self.q_network(states).gather(1, actions).squeeze(1)
 
         # Q_target = r + γ * max_a' Q(s', a') * (1 - done)
@@ -151,12 +144,16 @@ class DQN(LearningAlgorithm):
 
         loss = self.loss_fn(q_values, q_target)
 
+        # Update Q-network parameters through a gradient descent step
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-    def _decay(self, epsilon: float) -> float:
-        """Decay exploration/exploitation threshold"""
+    def log(self, logger: SummaryWriter, episode: int) -> None:
+        """Log information for an episode"""
 
-        # TODO Decay epsilon
-        return epsilon
+        logger.add_scalar(
+            tag="learning/exploration_probability",
+            scalar_value=self.epsilon,
+            global_step=episode,
+        )

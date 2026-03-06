@@ -17,31 +17,39 @@ class Config:
     # Learning algorithm to use
     algorithm: Literal["dqn"] = "dqn"
 
-    # Exponential decay parameter for epsilon-greedy algorithms: epsilon = beta^t
-    beta: float = 0.99
-
     # Discount factor for Temporal-Difference algorithms
     gamma: float = 0.99
 
     # Learning rate for gradient descent
     lr: float = 1e-3
 
-    # Batch size
-    batch_size: int = 32
+    # Batch size for sampling from replay buffer
+    batch_size: int = 64
 
     # Size of the DQN replay buffer
     replay_buffer_size: int = 10000
+
+    # Starting exploration probability
+    epsilon_start: float = 1
+
+    # Minimum exploration probability at the end of decay
+    epsilon_min: float = 0.05
+
+    # Exploration probability decay algorithm
+    exploration_decay: Literal["lin", "exp"] = "lin"
+
+    # Percentage of training time during which exploration probability is decayed
+    exploration_decay_span: float = 0.5
 
 
 class LearningAlgorithm(ABC):
     """Abstract base class for learning algorithms"""
 
-    def __init__(self, logger: SummaryWriter) -> None:
-        # TensorBoard writer for logging
-        self.logger = logger
+    def __init__(self, config: Config) -> None:
+        self.config = config
 
     @abstractmethod
-    def choose_action(self, state: np.ndarray) -> int:
+    def choose_action(self, state: np.ndarray, training_step: int) -> int:
         """Select an action to perform"""
 
     @abstractmethod
@@ -57,4 +65,8 @@ class LearningAlgorithm(ABC):
 
     @abstractmethod
     def learn(self) -> None:
-        """Perform a learning update"""
+        """Update model parameters"""
+
+    @abstractmethod
+    def log(self, logger: SummaryWriter, episode: int) -> None:
+        """Log information for an episode"""
