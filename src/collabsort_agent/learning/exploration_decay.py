@@ -36,13 +36,14 @@ class LinearExplorationDecay(ExplorationDecay):
     def __init__(self, config: LearningConfig, total_steps: int) -> None:
         super().__init__(config=config, total_steps=total_steps)
 
-    def _decay_epsilon(self, training_step: int) -> float:
-        decay_slope = (
+        # Pre-compute decay slope (ε_min - ε_start) / decay_steps
+        self._decay_slope: float = (
             self.config.epsilon_min - self.config.epsilon_start
         ) / self.decay_steps
 
-        # Decay epsilon linearly: ε = ε_min + t * (ε_min - ε_start) / decay_steps
-        return self.config.epsilon_start + decay_slope * training_step
+    def _decay_epsilon(self, training_step: int) -> float:
+        # Decay epsilon linearly: ε = ε_start + t * decay_slope
+        return self.config.epsilon_start + self._decay_slope * training_step
 
 
 class ExponentialExplorationDecay(ExplorationDecay):
@@ -51,19 +52,19 @@ class ExponentialExplorationDecay(ExplorationDecay):
     def __init__(self, config: LearningConfig, total_steps: int) -> None:
         super().__init__(config=config, total_steps=total_steps)
 
-    def _decay_epsilon(self, training_step: int) -> float:
         # Maximal difference between current and minimum values of epsilon for stopping decay
         epsilon_delta = 0.01
 
-        # Compute the decay rate λ to reach (epsilon_min + epsilon_delta) at decay_steps
-        decay_rate: float = (
+        # Pre-compute the decay rate λ
+        self._decay_rate: float = (
             -np.log(
                 epsilon_delta / (self.config.epsilon_start - self.config.epsilon_min)
             )
             / self.decay_steps
         )
 
+    def _decay_epsilon(self, training_step: int) -> float:
         # Decay epsilon exponentially: ε = ε_min + (ε_start - ε_min) * exp(-λt)
         return self.config.epsilon_min + (
             self.config.epsilon_start - self.config.epsilon_min
-        ) * np.exp(-decay_rate * training_step)
+        ) * np.exp(-self._decay_rate * training_step)

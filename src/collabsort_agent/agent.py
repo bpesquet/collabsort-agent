@@ -21,17 +21,19 @@ class Agent:
         self.memory = memory
         self.learner = learner
 
-        # Init internal data
-        self.cureent_sensory_state: np.ndarray | None = None
+        # Current extended state (sensory + memory)
+        self.current_extended_state: np.ndarray | None = None
+
+        # Newest action chosen by the agent
         self.current_action: Action | None = None
 
     def act(self, obs: dict, training_step: int) -> Action:
         """Select an action"""
 
-        self.cureent_sensory_state = self.perceiver.get_sensory_state(obs=obs)
-        extended_state = self.memory.get_extended_state(
-            sensory_state=self.cureent_sensory_state
-        )
+        sensory_state = self.perceiver.get_sensory_state(obs=obs)
+        extended_state = self.memory.get_extended_state(sensory_state=sensory_state)
+
+        self.current_extended_state = extended_state
 
         self.current_action = Action(
             self.learner.choose_action(
@@ -43,16 +45,21 @@ class Agent:
     def update(self, next_obs: dict, reward: float, done: bool) -> None:
         """Update agent after an action"""
 
-        if self.cureent_sensory_state is None or not self.current_action:
+        if self.current_extended_state is None or not self.current_action:
             raise Exception("Trying to update agent with non-existent state")
 
-        # Store state transition
+        # Compute next extended state (sensory + memory) for the transition
         next_sensory_state = self.perceiver.get_sensory_state(obs=next_obs)
+        next_extended_state = self.memory.get_extended_state(
+            sensory_state=next_sensory_state
+        )
+
+        # Store state transition
         self.learner.store_transition(
-            state=self.cureent_sensory_state,
+            state=self.current_extended_state,
             action=self.current_action.value,
             reward=reward,
-            next_state=next_sensory_state,
+            next_state=next_extended_state,
             done=done,
         )
 

@@ -41,6 +41,9 @@ class Config:
     # Percentage of training time during which exploration probability is decayed
     exploration_decay_span: float = 0.5
 
+    # Interval in learning steps to copy online weights to target network.
+    target_network_sync_freq: int = 500
+
 
 class LearningAlgorithm(ABC):
     """Abstract base class for learning algorithms"""

@@ -104,9 +104,11 @@ def create_agent(config: Config, sample_obs: dict, logger: SummaryWriter) -> Age
     )
     sample_sensory_state = perceiver.get_sensory_state(obs=sample_obs)
 
-    # Initialize memory
     if config.memory.type == "none":
         memory = Memory()
+    else:
+        raise Exception(f"Unrecognized memory type: {config.memory.type}")
+
     sample_extended_state = memory.get_extended_state(
         sensory_state=sample_sensory_state
     )

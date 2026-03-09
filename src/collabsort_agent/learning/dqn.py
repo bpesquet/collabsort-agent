@@ -17,7 +17,7 @@ from collabsort_agent.learning.learning import LearningAlgorithm
 
 
 def get_device() -> torch.device:
-    """Return accelerated device if available, or fail back to CPU"""
+    """Return accelerated device if available, or fall back to CPU"""
 
     return torch.device(
         "cuda"
@@ -72,23 +72,36 @@ class DQN(LearningAlgorithm):
 
         self.device = get_device()
 
-        # Create Q-network for estimating actions values
+        # Create Q-network for estimating action values
         self.q_network = QNetwork(input_size=state_size, output_size=n_actions).to(
             self.device
         )
-        self.loss_fn = nn.MSELoss()
+
+        # Use SmoothL1Loss (Huber) rather than MSELoss.
+        # DQN targets can have large variance; Huber loss is less sensitive to
+        # outlier rewards (acts like MAE for large errors, MSE for small ones).
+        self.loss_fn = nn.SmoothL1Loss()
+
         self.optimizer = optim.Adam(
             params=self.q_network.parameters(), lr=self.config.lr
         )
 
-        # Create target network with fixed parameters (useful to stabilize training)
+        # Create target network with fixed parameters (stabilizes training)
         self.target_network = QNetwork(input_size=state_size, output_size=n_actions).to(
             self.device
         )
         self.target_network.load_state_dict(self.q_network.state_dict())
+        # Target network must not accumulate gradients
+        self.target_network.eval()
 
         # Create replay buffer for training the Q-network
-        self.replay_buffer = deque(maxlen=self.config.replay_buffer_size)
+        self.replay_buffer: deque = deque(maxlen=self.config.replay_buffer_size)
+
+        # Step counter used to decide when to sync the target network
+        self._learn_step: int = 0
+
+        # Current exploration probability (set on first choose_action call)
+        self.epsilon: float = self.config.epsilon_start
 
     def choose_action(self, state: np.ndarray, training_step: int) -> int:
         # Update exploration probability
@@ -96,14 +109,14 @@ class DQN(LearningAlgorithm):
 
         # With probability epsilon: explore (choose a random action)
         if np.random.random() < self.epsilon:
-            return random.randint(0, self.n_actions - 1)
+            return int(np.random.randint(0, self.n_actions))
 
         # With probability (1-epsilon): exploit (greedily choose the best known action)
-        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        state_tensor = torch.from_numpy(state).float().unsqueeze(0).to(self.device)
         with torch.no_grad():
             q_values = self.q_network(state_tensor)
 
-        return torch.argmax(q_values, dim=1).cpu().numpy()
+        return int(torch.argmax(q_values, dim=1).item())
 
     def store_transition(
         self,
@@ -124,22 +137,31 @@ class DQN(LearningAlgorithm):
         batch = random.sample(self.replay_buffer, self.config.batch_size)
         states, actions, rewards, next_states, dones = zip(*batch, strict=True)
 
-        # Convert batch data to PyTorch tensors
-        states = torch.FloatTensor(np.array(states)).to(self.device)
-        actions = torch.LongTensor(actions).unsqueeze(1).to(self.device)
-        rewards = torch.FloatTensor(rewards).to(self.device)
-        next_states = torch.FloatTensor(np.array(next_states)).to(self.device)
-        dones = torch.FloatTensor(dones).to(self.device)
+        # Obtain PyTorch tensors from NumPy arrays.
+        # torch.from_numpy avoids allocating new memory
+        states = torch.from_numpy(np.array(states, dtype=np.float32)).to(self.device)
+        actions = torch.tensor(actions, dtype=torch.long, device=self.device).unsqueeze(
+            1
+        )
+        rewards = torch.tensor(rewards, dtype=torch.float32, device=self.device)
+        next_states = torch.from_numpy(np.array(next_states, dtype=np.float32)).to(
+            self.device
+        )
+        dones = torch.tensor(dones, dtype=torch.float32, device=self.device)
 
         # Clamp actions to valid range
         actions = torch.clamp(actions, 0, self.n_actions - 1)
 
-        # Compute action values for the batch data
+        # Compute action values for the current states
         q_values = self.q_network(states).gather(1, actions).squeeze(1)
 
-        # Q_target = r + γ * max_a' Q(s', a') * (1 - done)
+        # Using target_network (not q_network) to compute Q-targets.
+        # Using q_network here would defeat the purpose of the target network: the
+        # same network would be used both to generate targets and to be updated,
+        # creating a moving-target problem that destabilises training.
         with torch.no_grad():
-            q_next = self.q_network(next_states).max(1)[0]
+            q_next = self.target_network(next_states).max(1)[0]
+            # Q_target = r + gamma * max_a' Q_target(s', a') * (1 - done)
             q_target = rewards + self.config.gamma * q_next * (1 - dones)
 
         loss = self.loss_fn(q_values, q_target)
@@ -147,7 +169,17 @@ class DQN(LearningAlgorithm):
         # Update Q-network parameters through a gradient descent step
         self.optimizer.zero_grad()
         loss.backward()
+
+        # Clip gradients to prevent exploding gradients.
+        # max_norm=10 is a common conservative bound for DQN.
+        torch.nn.utils.clip_grad_norm_(self.q_network.parameters(), max_norm=10.0)
+
         self.optimizer.step()
+
+        # Periodically sync the target network with the online network.
+        self._learn_step += 1
+        if self._learn_step % self.config.target_network_sync_freq == 0:
+            self.target_network.load_state_dict(self.q_network.state_dict())
 
     def log(self, logger: SummaryWriter, episode: int) -> None:
         """Log information for an episode"""

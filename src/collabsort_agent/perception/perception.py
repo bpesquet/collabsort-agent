@@ -40,19 +40,16 @@ class Perceiver:
         robot_col: int = robot[1]
         state_features.extend([robot_row, robot_col])
 
-        # Board objects features
+        # Build a dict keyed by (row, col) for O(1) object lookup
         objects: tuple[dict] = obs["moving_objects"]
+        obj_map: dict = {(obj["coords"][0], obj["coords"][1]): obj for obj in objects}
+
         perceived_cols = [
             agent_col + col for col in range(self.config.n_perceived_cols)
         ]
         for row in self.treadmill_rows:
             for col in perceived_cols:
-                # Check if an object exists at this position
-                obj_found = None
-                for obj in objects:
-                    if obj["coords"][0] == row and obj["coords"][1] == col:
-                        obj_found = obj
-                        break
+                obj_found = obj_map.get((row, col))
                 if obj_found:
                     state_features.extend(
                         [
