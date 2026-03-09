@@ -47,6 +47,9 @@ class Config:
     # Maximal number of steps in an episode
     n_steps_episode: int = 1000
 
+    # Log training results
+    log_results: bool = True
+
 
 @dataclass
 class EpisodeMetrics:
@@ -69,32 +72,33 @@ class EpisodeMetrics:
 
     def log(
         self,
-        logger: SummaryWriter,
+        logger: SummaryWriter | None,
         episode: int,
     ) -> None:
         """Log metrics"""
 
-        logger.add_scalar(
-            tag="training/reward", scalar_value=self.reward, global_step=episode
-        )
-        logger.add_scalar(
-            tag="training/collisions",
-            scalar_value=self.collisions,
-            global_step=episode,
-        )
-        logger.add_scalar(
-            tag="training/collected_objects",
-            scalar_value=self.collected_objects,
-            global_step=episode,
-        )
-        logger.add_scalar(
-            tag="training/steps_per_seconds",
-            scalar_value=self.sps,
-            global_step=episode,
-        )
+        if logger is not None:
+            logger.add_scalar(
+                tag="training/reward", scalar_value=self.reward, global_step=episode
+            )
+            logger.add_scalar(
+                tag="training/collisions",
+                scalar_value=self.collisions,
+                global_step=episode,
+            )
+            logger.add_scalar(
+                tag="training/collected_objects",
+                scalar_value=self.collected_objects,
+                global_step=episode,
+            )
+            logger.add_scalar(
+                tag="training/steps_per_seconds",
+                scalar_value=self.sps,
+                global_step=episode,
+            )
 
 
-def create_agent(config: Config, sample_obs: dict, logger: SummaryWriter) -> Agent:
+def create_agent(config: Config, sample_obs: dict) -> Agent:
     """Create an agent with a specific configuration"""
 
     # Initialize perception
@@ -151,17 +155,17 @@ def create_agent(config: Config, sample_obs: dict, logger: SummaryWriter) -> Age
 def train(config: Config) -> None:
     """Train an agent"""
 
-    # Initialize logging
-    run_name: str = f"train_{config.learning.algorithm}_{int(time.time())}"
-    logger = SummaryWriter(f"runs/{run_name}")
+    logger = None
+    if config.log_results:
+        # Initialize logging
+        run_name: str = f"train_{config.learning.algorithm}_{int(time.time())}"
+        logger = SummaryWriter(f"runs/{run_name}")
 
     # Initialize environment
     env = gym.make("CollabSort-v0", config=config.env)
 
     # Create agent
-    agent = create_agent(
-        config=config, sample_obs=env.observation_space.sample(), logger=logger
-    )
+    agent = create_agent(config=config, sample_obs=env.observation_space.sample())
 
     # Training time step (= number of time steps since beginning of training)
     training_step: int = 0

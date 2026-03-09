@@ -66,7 +66,8 @@ class Agent:
         # Perform learning
         self.learner.learn()
 
-    def log(self, logger: SummaryWriter, episode: int) -> None:
+    def log(self, logger: SummaryWriter | None, episode: int) -> None:
         """Log agent information for an episode"""
 
-        self.learner.log(logger=logger, episode=episode)
+        if logger is not None:
+            self.learner.log(logger=logger, episode=episode)

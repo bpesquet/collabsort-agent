@@ -23,5 +23,6 @@ def test_random_agent() -> None:
             learning=LearningConfig(epsilon_start=1, epsilon_min=1),
             n_episodes=10,
             n_steps_episode=100,
+            log_results=False,
         )
     )
