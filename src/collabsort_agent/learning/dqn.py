@@ -4,6 +4,8 @@ Deep Q-Learning algorithm.
 
 import random
 from collections import deque
+from pathlib import Path
+from statistics import mean
 
 import numpy as np
 import torch
@@ -98,10 +100,16 @@ class DQN(LearningAlgorithm):
         self.replay_buffer: deque = deque(maxlen=self.config.replay_buffer_size)
 
         # Step counter used to decide when to sync the target network
-        self._learn_step: int = 0
+        self.learning_step: int = 0
 
         # Current exploration probability (set on first choose_action call)
         self.epsilon: float = self.config.epsilon_start
+
+        # Recorded loss values (used for logging)
+        self.losses: list[float] = []
+
+        # Average Q-values (used for logging)
+        self.mean_q_values: list[float] = []
 
     def choose_action(self, state: np.ndarray, training_step: int) -> int:
         # Update exploration probability
@@ -154,6 +162,7 @@ class DQN(LearningAlgorithm):
 
         # Compute action values for the current states
         q_values = self.q_network(states).gather(1, actions).squeeze(1)
+        self.mean_q_values.append(torch.mean(q_values).item())
 
         # Using target_network (not q_network) to compute Q-targets.
         # Using q_network here would defeat the purpose of the target network: the
@@ -165,6 +174,7 @@ class DQN(LearningAlgorithm):
             q_target = rewards + self.config.gamma * q_next * (1 - dones)
 
         loss = self.loss_fn(q_values, q_target)
+        self.losses.append(loss.item())
 
         # Update Q-network parameters through a gradient descent step
         self.optimizer.zero_grad()
@@ -177,15 +187,54 @@ class DQN(LearningAlgorithm):
         self.optimizer.step()
 
         # Periodically sync the target network with the online network.
-        self._learn_step += 1
-        if self._learn_step % self.config.target_network_sync_freq == 0:
+        self.learning_step += 1
+        if self.learning_step % self.config.target_network_sync_freq == 0:
             self.target_network.load_state_dict(self.q_network.state_dict())
 
-    def log(self, logger: SummaryWriter, episode: int) -> None:
-        """Log information for an episode"""
+    def log_episode(self, logger: SummaryWriter, episode: int) -> None:
+        """Log information after an episode"""
 
         logger.add_scalar(
             tag="learning/exploration_probability",
             scalar_value=self.epsilon,
             global_step=episode,
         )
+        logger.add_scalar(
+            tag="learning/td_loss",
+            scalar_value=mean(self.losses),
+            global_step=episode,
+        )
+        logger.add_scalar(
+            tag="learning/q_values",
+            scalar_value=mean(self.mean_q_values),
+            global_step=episode,
+        )
+
+        # Reset episode data
+        self.losses.clear()
+        self.mean_q_values.clear()
+
+    def save(self, run_dir: str) -> None:
+        Path(run_dir).mkdir(parents=True, exist_ok=True)
+        file_path = f"{run_dir}/learning.pth"
+        torch.save(
+            {
+                "q_network": self.q_network.state_dict(),
+                "target_network": self.target_network.state_dict(),
+                "optimizer": self.optimizer.state_dict(),
+                "epsilon": self.epsilon,
+            },
+            file_path,
+        )
+
+    def load(self, run_dir: str) -> None:
+        file_path = f"{run_dir}/learning.pth"
+        checkpoint = torch.load(file_path, map_location=self.device)
+
+        self.q_network.load_state_dict(checkpoint["q_network"])
+        self.target_network.load_state_dict(checkpoint["target_network"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.epsilon = float(checkpoint["epsilon"])
+
+        # Target network is only used for inference during target computation.
+        self.target_network.eval()

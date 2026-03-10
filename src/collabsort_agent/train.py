@@ -47,8 +47,11 @@ class Config:
     # Maximal number of steps in an episode
     n_steps_episode: int = 1000
 
-    # Log training results
-    log_results: bool = True
+    # Log training events
+    log_events: bool = True
+
+    # Save the trained agent
+    save_agent: bool = False
 
 
 @dataclass
@@ -155,11 +158,12 @@ def create_agent(config: Config, sample_obs: dict) -> Agent:
 def train(config: Config) -> None:
     """Train an agent"""
 
+    run_dir: str = f"runs/train_{config.learning.algorithm}_{int(time.time())}"
+
     logger = None
-    if config.log_results:
+    if config.log_events:
         # Initialize logging
-        run_name: str = f"train_{config.learning.algorithm}_{int(time.time())}"
-        logger = SummaryWriter(f"runs/{run_name}")
+        logger = SummaryWriter(f"{run_dir}")
 
     # Initialize environment
     env = gym.make("CollabSort-v0", config=config.env)
@@ -214,9 +218,12 @@ def train(config: Config) -> None:
             logger=logger,
             episode=episode,
         )
-        agent.log(logger=logger, episode=episode)
+        agent.log_episode(logger=logger, episode=episode)
 
     env.close()
+
+    if config.save_agent:
+        agent.save(run_dir=run_dir)
 
 
 if __name__ == "__main__":  # pragma: no cover

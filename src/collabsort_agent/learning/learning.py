@@ -71,5 +71,13 @@ class LearningAlgorithm(ABC):
         """Update model parameters"""
 
     @abstractmethod
-    def log(self, logger: SummaryWriter, episode: int) -> None:
-        """Log information for an episode"""
+    def log_episode(self, logger: SummaryWriter, episode: int) -> None:
+        """Log information after an episode"""
+
+    @abstractmethod
+    def save(self, run_dir: str) -> None:
+        """Save the learning component"""
+
+    @abstractmethod
+    def load(self, run_dir: str) -> None:
+        """Load a previously saved learning component"""

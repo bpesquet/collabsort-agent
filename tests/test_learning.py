@@ -3,6 +3,7 @@ Unit test for learning.
 """
 
 import numpy as np
+import torch
 from numpy.testing import assert_almost_equal
 
 from collabsort_agent.learning import Config as LearningConfig
@@ -77,13 +78,12 @@ def test_dqn() -> None:
 
     # Learning hyperparameters
     config = LearningConfig()
-    explo_decay = LinearExplorationDecay(config=config, total_steps=1000)
     initial_state = np.array([0, 2, -1, 7], dtype=np.float32)
     n_actions = 4
 
     dqn = DQN(
         config=config,
-        exploration_decay=explo_decay,
+        exploration_decay=LinearExplorationDecay(config=config, total_steps=1000),
         state_size=len(initial_state),
         n_actions=n_actions,
     )
@@ -108,13 +108,12 @@ def test_dqn_target_network_syncs() -> None:
     config = LearningConfig(
         target_network_sync_freq=5, batch_size=4, replay_buffer_size=100
     )
-    explo_decay = LinearExplorationDecay(config=config, total_steps=1000)
     state = np.zeros(4, dtype=np.float32)
     n_actions = 2
 
     dqn = DQN(
         config=config,
-        exploration_decay=explo_decay,
+        exploration_decay=LinearExplorationDecay(config=config, total_steps=1000),
         state_size=4,
         n_actions=n_actions,
     )
@@ -132,3 +131,53 @@ def test_dqn_target_network_syncs() -> None:
         dqn.q_network.parameters(), dqn.target_network.parameters(), strict=True
     ):
         assert (p_online.data == p_target.data).all(), "Target network not synced"
+
+
+def test_dqn_save_and_load(tmp_path) -> None:
+    """Saving and loading should restore DQN internal state"""
+
+    config = LearningConfig(lr=1e-3)
+    state = np.zeros(4, dtype=np.float32)
+
+    dqn = DQN(
+        config=config,
+        exploration_decay=LinearExplorationDecay(config=config, total_steps=1000),
+        state_size=4,
+        n_actions=2,
+    )
+
+    with torch.no_grad():
+        for i, param in enumerate(dqn.q_network.parameters()):
+            param.fill_(0.1 * (i + 1))
+        for i, param in enumerate(dqn.target_network.parameters()):
+            param.fill_(0.2 * (i + 1))
+
+    saved_lr = 5e-4
+    dqn.optimizer.param_groups[0]["lr"] = saved_lr
+    dqn.epsilon = 0.42
+
+    run_dir = tmp_path / "save_roundtrip"
+    dqn.save(run_dir=str(run_dir))
+
+    restored = DQN(
+        config=config,
+        exploration_decay=LinearExplorationDecay(config=config, total_steps=1000),
+        state_size=len(state),
+        n_actions=2,
+    )
+    restored.load(run_dir=str(run_dir))
+
+    for p_saved, p_restored in zip(
+        dqn.q_network.parameters(), restored.q_network.parameters(), strict=True
+    ):
+        assert torch.equal(p_saved, p_restored)
+
+    for p_saved, p_restored in zip(
+        dqn.target_network.parameters(),
+        restored.target_network.parameters(),
+        strict=True,
+    ):
+        assert torch.equal(p_saved, p_restored)
+
+    assert restored.optimizer.param_groups[0]["lr"] == saved_lr
+    assert restored.epsilon == dqn.epsilon
