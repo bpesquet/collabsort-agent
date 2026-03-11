@@ -27,7 +27,7 @@ class Agent:
         # Newest action chosen by the agent
         self.current_action: Action | None = None
 
-    def act(self, obs: dict, training_step: int) -> Action:
+    def act(self, obs: dict, training_step: int | None = None) -> Action:
         """Select an action"""
 
         sensory_state = self.perceiver.get_sensory_state(obs=obs)
@@ -72,7 +72,12 @@ class Agent:
         if logger is not None:
             self.learner.log_episode(logger=logger, episode=episode)
 
-    def save(self, run_dir: str) -> None:
-        """Save an agent for later usage"""
+    def save_state(self, dir: str) -> None:
+        """Save the agent state to disk"""
 
-        self.learner.save(run_dir=run_dir)
+        self.learner.save(dir=dir)
+
+    def load_state(self, dir: str) -> None:
+        """Load the agent state from disk"""
+
+        self.learner.load(dir=dir)

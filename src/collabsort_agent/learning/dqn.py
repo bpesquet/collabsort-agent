@@ -111,9 +111,12 @@ class DQN(LearningAlgorithm):
         # Average Q-values (used for logging)
         self.mean_q_values: list[float] = []
 
-    def choose_action(self, state: np.ndarray, training_step: int) -> int:
-        # Update exploration probability
-        self.epsilon = self.exploration_decay.get_epsilon(training_step=training_step)
+    def choose_action(self, state: np.ndarray, training_step: int | None) -> int:
+        if training_step is not None:
+            # Update exploration probability
+            self.epsilon = self.exploration_decay.get_epsilon(
+                training_step=training_step
+            )
 
         # With probability epsilon: explore (choose a random action)
         if np.random.random() < self.epsilon:
@@ -214,9 +217,9 @@ class DQN(LearningAlgorithm):
         self.losses.clear()
         self.mean_q_values.clear()
 
-    def save(self, run_dir: str) -> None:
-        Path(run_dir).mkdir(parents=True, exist_ok=True)
-        file_path = f"{run_dir}/learning.pth"
+    def save(self, dir: str) -> None:
+        Path(dir).mkdir(parents=True, exist_ok=True)
+        file_path = f"{dir}/learning.pth"
         torch.save(
             {
                 "q_network": self.q_network.state_dict(),
@@ -227,8 +230,8 @@ class DQN(LearningAlgorithm):
             file_path,
         )
 
-    def load(self, run_dir: str) -> None:
-        file_path = f"{run_dir}/learning.pth"
+    def load(self, dir: str) -> None:
+        file_path = f"{dir}/learning.pth"
         checkpoint = torch.load(file_path, map_location=self.device)
 
         self.q_network.load_state_dict(checkpoint["q_network"])

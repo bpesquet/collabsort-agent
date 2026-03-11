@@ -52,7 +52,7 @@ class LearningAlgorithm(ABC):
         self.config = config
 
     @abstractmethod
-    def choose_action(self, state: np.ndarray, training_step: int) -> int:
+    def choose_action(self, state: np.ndarray, training_step: int | None) -> int:
         """Select an action to perform"""
 
     @abstractmethod
@@ -75,9 +75,9 @@ class LearningAlgorithm(ABC):
         """Log information after an episode"""
 
     @abstractmethod
-    def save(self, run_dir: str) -> None:
+    def save(self, dir: str) -> None:
         """Save the learning component"""
 
     @abstractmethod
-    def load(self, run_dir: str) -> None:
+    def load(self, dir: str) -> None:
         """Load a previously saved learning component"""

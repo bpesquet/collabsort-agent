@@ -157,7 +157,7 @@ def test_dqn_save_and_load(tmp_path) -> None:
     dqn.epsilon = 0.42
 
     run_dir = tmp_path / "save_roundtrip"
-    dqn.save(run_dir=str(run_dir))
+    dqn.save(dir=str(run_dir))
 
     restored = DQN(
         config=config,
@@ -165,7 +165,7 @@ def test_dqn_save_and_load(tmp_path) -> None:
         state_size=len(state),
         n_actions=2,
     )
-    restored.load(run_dir=str(run_dir))
+    restored.load(dir=str(run_dir))
 
     for p_saved, p_restored in zip(
         dqn.q_network.parameters(), restored.q_network.parameters(), strict=True
