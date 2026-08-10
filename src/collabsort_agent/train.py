@@ -29,8 +29,8 @@ from collabsort_agent.learning.dueling_dqn import DuelingDQN
 from collabsort_agent.learning.n_step_learning import NStepLearning
 from collabsort_agent.learning.per import PER
 from collabsort_agent.learning.q_learning import Qlearning
+from collabsort_agent.memory.history_memory import HistoryMemory
 from collabsort_agent.memory.memory import Memory
-from collabsort_agent.memory.stack import StackMemory
 from collabsort_agent.metacognition import Hyperparameters
 from collabsort_agent.metacognition.confidence import (
     BayesianConfidence,
@@ -310,13 +310,14 @@ def create_agent(config: Config, sample_obs: dict, rng: np.random.Generator) -> 
 
     if mem_type == "none":
         memory: Memory = Memory()
-    elif mem_type == "stack":
-        memory = StackMemory(config=config.memory)
+    elif mem_type == "history":
+        memory = HistoryMemory(config=config.memory)
     else:
         raise ValueError(f"Unrecognized memory type: {mem_type}")
 
     sample_extended_state = memory.get_extended_state(
-        sensory_state=sample_sensory_state
+        sensory_state=sample_sensory_state,
+        expected_past_state_size=len(perceiver.get_past_state(obs=sample_obs)),
     )
 
     # Initialize metacognition & dimensions
@@ -347,7 +348,15 @@ def create_agent(config: Config, sample_obs: dict, rng: np.random.Generator) -> 
     return Agent(perceiver=perceiver, memory=memory, deliberator=deliberator)
 
 
-def train(config: Config) -> None:
+@dataclass
+class TrainArgs:
+    """Arguments for training."""
+
+    config: Config
+    pretrained_state_dir: str | None = None
+
+
+def train(config: Config, pretrained_state_dir: str | None = None) -> None:
     """Train an agent"""
 
     # Allow PyTorch to use TF32 (tensor float 32) on Ampere+ GPUs.
@@ -367,6 +376,10 @@ def train(config: Config) -> None:
     agent = create_agent(
         config=config, sample_obs=env.observation_space.sample(), rng=env.np_random
     )
+
+    if pretrained_state_dir is not None:
+        print(f"Loading pretrained state from {pretrained_state_dir}...")
+        agent.load_state(dir=pretrained_state_dir)
 
     # Training time step (= number of time steps since beginning of training)
     training_step: int = 0
@@ -430,13 +443,16 @@ def train(config: Config) -> None:
             if dist <= 2:
                 reward_up += float(config.env.collision_penalty)
 
+            # Action PICK
+            reward_pick = float(
+                config.env.step_reward + config.env.failed_action_penalty
+            )
+
             possible_rewards = {
                 Action.NONE: reward_none,
                 Action.DOWN: reward_down,
                 Action.UP: reward_up,
-                # PICK in the void is strictly worse than NONE for stats purposes (avoids polluting the PICK match counter),
-                # but stays numerically close to NONE so it doesn't distort optimized_reward.
-                Action.PICK: reward_none - 1e-6,
+                Action.PICK: reward_pick,
             }
 
             # Action PICK
@@ -531,7 +547,8 @@ def train(config: Config) -> None:
             )
 
         # Log episode data
-        ep_metrics.sps = int(training_step / (time.time() - start_time))
+        elapsed_time = time.time() - start_time
+        ep_metrics.sps = int(training_step / elapsed_time) if elapsed_time > 0 else 0
         ep_metrics.log(
             logger=logger,
             episode=episode,
@@ -565,6 +582,6 @@ def train(config: Config) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     # Create training configuration from command line args
-    config: Config = tyro.cli(Config)
+    args: TrainArgs = tyro.cli(TrainArgs)
 
-    train(config=config)
+    train(config=args.config, pretrained_state_dir=args.pretrained_state_dir)
