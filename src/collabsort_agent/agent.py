@@ -24,8 +24,7 @@ class Agent:
         # Current extended state (sensory + memory)
         self.current_extended_state: np.ndarray | None = None
 
-        # Current future sensory state (without memory extension)
-        self.current_sensory_state: np.ndarray | None = None
+        # Current transition context needed by memory updates
         self.current_past_state: np.ndarray | None = None
         self.current_agent_position: tuple[int, int] | None = None
         self.current_robot_position: tuple[int, int] | None = None
@@ -35,7 +34,6 @@ class Agent:
 
         # Cached next state to prevent double-updating memory modules
         self.next_extended_state: np.ndarray | None = None
-        self.next_sensory_state: np.ndarray | None = None
         self.next_past_state: np.ndarray | None = None
         self.next_agent_position: tuple[int, int] | None = None
         self.next_robot_position: tuple[int, int] | None = None
@@ -45,13 +43,11 @@ class Agent:
 
         self.memory.reset()
         self.current_extended_state = None
-        self.current_sensory_state = None
         self.current_past_state = None
         self.current_agent_position = None
         self.current_robot_position = None
         self.current_action = None
         self.next_extended_state = None
-        self.next_sensory_state = None
         self.next_past_state = None
         self.next_agent_position = None
         self.next_robot_position = None
@@ -65,18 +61,15 @@ class Agent:
 
         if self.next_extended_state is not None:
             extended_state = self.next_extended_state
-            self.current_sensory_state = self.next_sensory_state
             self.current_past_state = self.next_past_state
             self.current_agent_position = self.next_agent_position
             self.current_robot_position = self.next_robot_position
             self.next_extended_state = None
-            self.next_sensory_state = None
             self.next_past_state = None
             self.next_agent_position = None
             self.next_robot_position = None
         else:
             future_state = self.perceiver.get_sensory_state(obs=obs)
-            self.current_sensory_state = future_state
             self.current_agent_position = tuple(obs["self"]["coords"])
             self.current_robot_position = tuple(obs["robot"])
 
@@ -142,7 +135,6 @@ class Agent:
         )
 
         self.next_extended_state = next_extended_state
-        self.next_sensory_state = next_sensory_state
         self.next_agent_position = tuple(next_obs["self"]["coords"])
         self.next_robot_position = tuple(next_obs["robot"])
 
