@@ -9,9 +9,6 @@ import time
 from dataclasses import dataclass
 
 import gymnasium as gym
-
-# Use a non-interactive backend for matplotlib to avoid Tkinter
-# objects being created on worker threads (prevents Tkinter cleanup errors)
 import matplotlib
 import numpy as np
 import torch
@@ -29,6 +26,7 @@ from collabsort_agent.common import EpisodeMetrics, create_agent
 from collabsort_agent.config import Config, save_cfg
 from collabsort_agent.decision.epsilon_greedy import EpsilonGreedy
 from collabsort_agent.metrics_tracker import HeatmapTracker
+from collabsort_agent.optimal_rewards import EpisodeTrajectory, compute_optimal_reward
 
 
 @dataclass
@@ -210,6 +208,8 @@ def train(
             episode_collisions = np.zeros(base_config.env.n_rows + 1, dtype=np.int32)
             episode_spatial_actions: dict[int, dict[int, int]] = {}
 
+            trajectory = EpisodeTrajectory()
+
             # Previous action string for oscillation counting
             prev_action_str: str | None = None
 
@@ -222,6 +222,14 @@ def train(
                 if 1 <= agent_row <= base_config.env.n_rows:
                     episode_visitation[agent_row] += 1
 
+                # Record state for the optimal rewards
+                arm_base_col = int(obs["self"]["coords"][1])
+                trajectory.record(
+                    obs=obs,
+                    active_agent_rewards=base_config.env.agent_rewards,
+                    arm_base_col=arm_base_col,
+                )
+
                 # Agent chooses an action
                 decision_step = (
                     phase_training_step
@@ -232,85 +240,6 @@ def train(
                     else global_training_step
                 )
                 action: Action = agent.act(obs=obs, training_step=decision_step)
-
-                # Compute best possible immediate reward from this state
-                if (
-                    base_config.env.enable_reward_change
-                    and phase_training_step >= base_config.env.reward_change_step
-                ):
-                    active_agent_rewards = base_config.env.agent_rewards_after
-                else:
-                    active_agent_rewards = base_config.env.agent_rewards
-
-                agent_row = int(obs["self"]["coords"][0])
-                robot_row = int(obs["robot"][0])
-                dist = agent_row - robot_row
-
-                # Action NONE
-                reward_none = float(base_config.env.step_reward)
-                if dist == 1:
-                    reward_none += float(base_config.env.collision_penalty)
-
-                # Action DOWN
-                reward_down = float(
-                    base_config.env.step_reward + base_config.env.movement_penalty
-                )
-
-                # Action UP
-                reward_up = float(
-                    base_config.env.step_reward + base_config.env.movement_penalty
-                )
-                if dist <= 2:
-                    reward_up += float(base_config.env.collision_penalty)
-
-                # Action PICK
-                reward_pick = float(
-                    base_config.env.step_reward + base_config.env.failed_action_penalty
-                )
-
-                possible_rewards = {
-                    Action.NONE: reward_none,
-                    Action.DOWN: reward_down,
-                    Action.UP: reward_up,
-                    Action.PICK: reward_pick,
-                }
-
-                # Action PICK
-                if obs["self"]["picked_object"] == 0:
-                    agent_coords = obs["self"]["coords"]
-                    pickable = [
-                        obj
-                        for obj in obs["moving_objects"]
-                        if obj["coords"][0] == agent_coords[0]
-                        and obj["coords"][1] == agent_coords[1]
-                    ]
-                    if len(pickable) == 1:
-                        obj = pickable[0]
-                        pick_val = float(
-                            active_agent_rewards[obj["color"], obj["shape"]]
-                        )
-                        reward_pick = float(base_config.env.step_reward + pick_val)
-                        if dist == 1:
-                            reward_pick += float(base_config.env.collision_penalty)
-                        possible_rewards[Action.PICK] = reward_pick
-
-                best_reward = max(possible_rewards.values())
-                ep_metrics.optimized_reward += best_reward
-
-                # Find which actions were optimal
-                best_actions = [
-                    act for act, rew in possible_rewards.items() if rew == best_reward
-                ]
-                for act in best_actions:
-                    ep_metrics.optimal_action_counts[act.name] += 1
-
-                # Track if agent's action was optimal
-                # Since action could be an integer or Action enum due to act() return type
-                act_enum = Action(action)
-                ep_metrics.agent_action_counts[act_enum.name] += 1
-                if act_enum in best_actions:
-                    ep_metrics.optimal_action_matches += 1
-                    ep_metrics.optimal_matches_by_action[act_enum.name] += 1
 
                 # Count oscillations (UP/DOWN direction changes)
                 current_action_str = action.name
@@ -373,6 +302,37 @@ def train(
                     or ep_metrics.step >= base_config.n_steps_episode
                 )
 
+            # Compute optimal theoretical reward
+            optimal_reward, opt_actions = compute_optimal_reward(
+                trajectory, base_config
+            )
+
+            ep_metrics.optimal_reward = float(optimal_reward)
+
+            # Compute agent action counts and optimal action matches
+            agent_counts: dict[str, int] = {}
+            for a_idx in action_history:
+                name = Action(int(a_idx)).name
+                agent_counts[name] = agent_counts.get(name, 0) + 1
+
+            optimal_matches_by_action: dict[str, int] = {}
+            optimal_action_matches = 0
+            min_len = min(len(action_history), len(opt_actions))
+            for i in range(min_len):
+                ah = int(action_history[i])
+                oh = int(opt_actions[i])
+
+                if ah == oh:
+                    name = Action(ah).name
+                    optimal_matches_by_action[name] = (
+                        optimal_matches_by_action.get(name, 0) + 1
+                    )
+                    optimal_action_matches += 1
+
+            ep_metrics.agent_action_counts = agent_counts
+            ep_metrics.optimal_matches_by_action = optimal_matches_by_action
+            ep_metrics.optimal_action_matches = optimal_action_matches
+
             # Log episode data globally
             ep_metrics.sps = int(
                 global_training_step / max(1, time.time() - start_time)
@@ -381,10 +341,7 @@ def train(
             agent.log_episode(logger=logger, episode=global_episode)
 
             # --- HEATMAPS ---
-            try:
-                n_actions = int(agent.deliberator.estimator.n_actions)
-            except (AttributeError, TypeError):
-                n_actions = len(Action)
+            n_actions = len(Action)
 
             heatmap_tracker.update(
                 action_history=action_history,
