@@ -119,7 +119,7 @@ def test_train_from_pretrained(tmp_path) -> None:
 
     # 1. Sauvegarde d'un état d'agent initial dans un dossier temporaire
     pretrained_dir = str(tmp_path / "pretrained_agent")
-    env = gym.make("CollabSort-v0", config=cfg.env)
+    env = gym.make(id=cfg.env_id, config=cfg.env)
     agent = create_agent(
         config=cfg, sample_obs=env.observation_space.sample(), rng=env.np_random
     )

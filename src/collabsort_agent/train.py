@@ -134,7 +134,7 @@ def train(
     # Temporary environment to sample observation space for agent creation
     # We use base_config.env because it has been updated in load_phases to include all
     # treadmills across the curriculum, ensuring the agent is sized for the max observation.
-    temp_env = gym.make("CollabSort-v0", config=base_config.env)
+    temp_env = gym.make(id=base_config.env_id, config=base_config.env)
 
     # Create agent
     agent = create_agent(
@@ -181,7 +181,7 @@ def train(
             agent.deliberator.reset_for_phase(phase_steps=phase_steps)
 
         # Create the environment for this specific phase
-        env = gym.make("CollabSort-v0", config=phase.env_config)
+        env = gym.make(id=base_config.env_id, config=phase.env_config)
         agent.reset()
 
         # If the agent's memory requires past-state input, perform a dummy call to get_extended_state to ensure the memory is initialized correctly.

@@ -6,6 +6,7 @@ import gymnasium as gym
 import numpy as np
 from gym_collabsort.config import Config as EnvConfig
 
+from collabsort_agent.config import Config
 from collabsort_agent.perception import Perceiver, PerceptionConfig
 
 
@@ -34,7 +35,7 @@ def make_perceiver(
 def sample_obs(env_config: EnvConfig) -> dict:
     """Helper function to sample an observation from the environment."""
 
-    env = gym.make("CollabSort-v0", config=env_config)
+    env = gym.make(Config().env_id, config=env_config)
     obs, _ = env.reset()
     env.close()
     return obs
@@ -64,7 +65,7 @@ def test_perceiver_state_size() -> None:
                 else:
                     total_cols += n_future_cols
 
-            expected_len = 3 + 2 + (total_cols * 3)
+            expected_len = 4 + 4 + (total_cols * 3)
             assert len(sensory_state) == expected_len
 
 
@@ -73,22 +74,28 @@ def test_perceiver_state_content() -> None:
     perceiver, env_config = make_perceiver()
     obs = sample_obs(env_config=env_config)
 
-    # Check agent coordinates
     sensory_state = perceiver.get_sensory_state(obs=obs)
+
+    # Check agent coordinates
     agent_row, agent_col = obs["self"]["coords"]
     assert sensory_state[0] == agent_row
     assert sensory_state[1] == agent_col
 
-    # Check picked object flag
+    # Check picked object and collision penalty flags for agent
     assert sensory_state[2] == obs["self"]["picked_object"]
+    assert sensory_state[3] == obs["self"]["collision_penalty"]
 
     # Check robot coordinates
-    robot_row, robot_col = obs["robot"]
-    assert sensory_state[3] == robot_row
-    assert sensory_state[4] == robot_col
+    robot_row, robot_col = obs["robot"]["coords"]
+    assert sensory_state[4] == robot_row
+    assert sensory_state[5] == robot_col
+
+    # Check picked object and collision penalty flags for robot
+    assert sensory_state[6] == obs["self"]["picked_object"]
+    assert sensory_state[7] == obs["self"]["collision_penalty"]
 
     # Check object presence flag.
-    presence_indices = range(5, len(sensory_state), 3)
+    presence_indices = range(8, len(sensory_state), 3)
     for i in presence_indices:
         assert sensory_state[i] in (0.0, 1.0), (
             f"Presence flag at index {i} should be 0 or 1"

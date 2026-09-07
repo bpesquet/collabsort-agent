@@ -10,6 +10,12 @@ import numpy as np
 from gym_collabsort.config import Action
 from torch.utils.tensorboard import SummaryWriter
 
+# Picked object reward values span roughly 0..16 with the default reward
+# matrices. The picked-values histogram is forced to this fixed number of bins
+# so that per-episode histograms always share the same shape, which np.vstack in
+# HeatmapTracker.log_heatmaps requires.
+N_PICKED_VALUE_BINS = 17
+
 
 def _log_heatmap(
     logger: SummaryWriter,
@@ -82,10 +88,14 @@ class HeatmapTracker:
             self.action_counts_history.append(counts)
 
         # 2. Picked values
-        if len(picked_values) > 0:
-            counts = np.bincount(np.array(picked_values, dtype=np.int32), minlength=9)
-        else:
-            counts = np.zeros(9, dtype=np.int32)
+        # Clip out-of-range values and truncate so every episode contributes a
+        # histogram of exactly N_PICKED_VALUE_BINS entries.
+        values = np.clip(
+            np.array(picked_values, dtype=np.int32), 0, N_PICKED_VALUE_BINS - 1
+        )
+        counts = np.bincount(values, minlength=N_PICKED_VALUE_BINS)[
+            :N_PICKED_VALUE_BINS
+        ]
         self.picked_values_history.append(counts)
 
         # 3. Spatial stats
@@ -120,7 +130,7 @@ class HeatmapTracker:
                 ylabel="object reward value",
                 colorbar_label="count",
                 origin="lower",
-                yticks_labels=[str(v) for v in range(9)],
+                yticks_labels=[str(v) for v in range(N_PICKED_VALUE_BINS)],
             )
 
         # 2. Action distribution heatmap

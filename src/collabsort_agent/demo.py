@@ -25,7 +25,7 @@ def demo(train_dir: str) -> None:
     config.env.render_mode = RenderMode.HUMAN
 
     # Initialize environment
-    env = gym.make("CollabSort-v0", config=config.env)
+    env = gym.make(id=config.env_id, config=config.env)
 
     # Create agent and load its state from disk
     agent = create_agent(

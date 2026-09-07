@@ -3,7 +3,7 @@ Configuration definitions.
 """
 
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from gym_collabsort.config import Config as EnvConfig
 
@@ -19,22 +19,25 @@ class Config:
     """Training configuration"""
 
     # Environment configuration
-    env: EnvConfig
+    env: EnvConfig = field(default_factory=EnvConfig)
 
     # Perception configuration
-    perception: PerceptionConfig
+    perception: PerceptionConfig = field(default_factory=PerceptionConfig)
 
     # Memory configuration
-    memory: MemoryConfig
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
 
     # Decision configuration
-    decision: DecisionConfig
+    decision: DecisionConfig = field(default_factory=DecisionConfig)
 
     # Learning configuration
-    learning: LearningConfig
+    learning: LearningConfig = field(default_factory=LearningConfig)
 
     # Metacognition configuration
-    meta: MetaConfig
+    meta: MetaConfig = field(default_factory=MetaConfig)
+
+    # Environment version
+    env_id: str = "CollabSort-v1"
 
     # Number of training episodes
     n_episodes: int = 300

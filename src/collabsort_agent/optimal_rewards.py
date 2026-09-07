@@ -36,7 +36,7 @@ class EpisodeTrajectory:
         arm_base_col: int,
     ) -> None:
         """Append one step record from the current observation."""
-        robot_row = int(obs["robot"][0])
+        robot_row = int(obs["robot"]["coords"][0])
 
         pickable: list[tuple[int, float]] = []
         for obj in obs["moving_objects"]:

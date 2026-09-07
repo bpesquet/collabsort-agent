@@ -86,14 +86,21 @@ class Perceiver:
         agent: dict = obs["self"]
         agent_row: int = agent["coords"][0]
         agent_col: int = agent["coords"][1]
-        picked_object: int = agent["picked_object"]
-        state_features.extend([agent_row, agent_col, picked_object])
+        agent_picked_object: int = agent["picked_object"]
+        agent_collision_penalty: int = agent["collision_penalty"]
+        state_features.extend(
+            [agent_row, agent_col, agent_picked_object, agent_collision_penalty]
+        )
 
         # Robot features
         robot: dict = obs["robot"]
-        robot_row: int = robot[0]
-        robot_col: int = robot[1]
-        state_features.extend([robot_row, robot_col])
+        robot_row: int = robot["coords"][0]
+        robot_col: int = robot["coords"][1]
+        robot_picked_object: int = robot["picked_object"]
+        robot_collision_penalty: int = robot["collision_penalty"]
+        state_features.extend(
+            [robot_row, robot_col, robot_picked_object, robot_collision_penalty]
+        )
 
         # Build a dict keyed by (row, col) for O(1) object lookup
         objects: tuple[dict] = obs["moving_objects"]
