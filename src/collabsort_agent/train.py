@@ -92,19 +92,22 @@ def train(config: Config) -> None:
                 terminated or truncated or ep_metrics.step >= config.n_steps_episode
             )
 
-        # Log episode metrics
         ep_metrics.sps = int(training_step / (time.time() - start_time))
-        ep_metrics.log(
-            logger=logger,
-            episode=episode,
-        )
+
+        if config.save_output:
+            # Log episode metrics
+            ep_metrics.log(
+                logger=logger,
+                episode=episode,
+            )
 
     env.close()
     logger.close()
 
-    # Serialize config and agent state
-    config.serialize(dir=train_dir)
-    agent.serialize(dir=train_dir)
+    if config.save_output:
+        # Serialize config and agent state
+        config.serialize(dir=train_dir)
+        agent.serialize(dir=train_dir)
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -6,7 +6,7 @@ import gymnasium as gym
 import numpy as np
 from gym_collabsort.config import Config as EnvConfig
 
-from collabsort_agent.config import AgentConfig
+from collabsort_agent.config import Config
 from collabsort_agent.perception import Perceiver, PerceptionConfig
 
 
@@ -26,7 +26,7 @@ def make_perceiver(
 def sample_obs(env_config: EnvConfig) -> dict:
     """Helper function to sample an observation from the environment."""
 
-    env = gym.make(id=AgentConfig().env_id, config=env_config)
+    env = gym.make(id=Config().env_id, config=env_config)
     # obs: dict = env.observation_space.sample()
     obs = env.observation_space.sample()
     env.close()

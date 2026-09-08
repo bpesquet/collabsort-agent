@@ -37,6 +37,9 @@ class Config:
     # Directory used to load a previously saved configuration
     load_dir: str | None = None
 
+    # Flag for saving agent state, configuration and metrics to disk
+    save_output: bool = True
+
     @property
     def total_steps(self) -> int:
         """Total number of training steps"""

@@ -1,152 +1,90 @@
 """
-Unit tests for training and curriculum learning.
+Unit tests for training.
 """
 
-import json
-
 import gymnasium as gym
-from collabsort_agent.common import create_agent
 from gym_collabsort.config import Config as EnvConfig
 
-from collabsort_agent.config import AgentConfig, load_cfg, save_cfg
+from collabsort_agent.agent import AgentConfig
+from collabsort_agent.agent_factory import create_agent
+from collabsort_agent.config import Config
 from collabsort_agent.decision import DecisionConfig
 from collabsort_agent.learning import LearningConfig
 from collabsort_agent.memory import MemoryConfig
 from collabsort_agent.metacognition import MetaConfig
 from collabsort_agent.perception import PerceptionConfig
-from collabsort_agent.train import CurriculumPhase, load_phases, train
+from collabsort_agent.train import train
 
 
-def test_compute_total_training_steps() -> None:
-    """The total curriculum length should be the sum of all phase steps."""
+def _make_config() -> Config:
+    """Helper to build a minimal, fast training configuration."""
 
-    phases = [
-        CurriculumPhase(name="phase-1", n_episodes=2, env_config=EnvConfig()),
-        CurriculumPhase(name="phase-2", n_episodes=3, env_config=EnvConfig()),
-    ]
-    n_steps_episode = 10
-
-    total_steps = sum(p.n_episodes * n_steps_episode for p in phases)
-    assert total_steps == 50
-
-
-def test_random_agent() -> None:
-    """Test a standard training loop (single default phase)."""
-
-    cfg = AgentConfig(
-        env=EnvConfig(),
+    agent_config = AgentConfig(
         perception=PerceptionConfig(),
         memory=MemoryConfig(),
+        # Fully random agent to keep the run cheap and deterministic
         decision=DecisionConfig(epsilon_start=1, epsilon_min=1),
         learning=LearningConfig(),
         meta=MetaConfig(),
-        n_episodes=2,
-        n_steps_episode=50,
-        log_events=False,
-        save_state=False,
     )
-
-    phases = load_phases(base_config=cfg, json_path=None)
-    assert len(phases) == 1
-
-    train(config=cfg, phases=phases)
-
-
-def test_train_curriculum(tmp_path) -> None:
-    """Test multi-phase curriculum training with a JSON config."""
-
-    json_path = tmp_path / "dummy_curriculum.json"
-    dummy_phases = [
-        {
-            "name": "Phase 1 - Easy",
-            "n_episodes": 2,
-            "env_overrides": {"robot_enabled": False, "active_treadmills": ["upper"]},
-        },
-        {
-            "name": "Phase 2 - Hard",
-            "n_episodes": 2,
-            "env_overrides": {
-                "robot_enabled": True,
-                "reward_noise_std": 0.5,
-                "active_treadmills": ["upper", "lower"],
-            },
-        },
-    ]
-
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(dummy_phases, f)
-
-    cfg = AgentConfig(
+    return Config(
         env=EnvConfig(),
-        perception=PerceptionConfig(),
-        memory=MemoryConfig(),
-        decision=DecisionConfig(epsilon_start=1, epsilon_min=1),
-        learning=LearningConfig(),
-        meta=MetaConfig(),
-        n_episodes=2,
-        n_steps_episode=50,
-        log_events=False,
-        save_state=False,
-    )
-
-    phases = load_phases(base_config=cfg, json_path=str(json_path))
-
-    assert len(phases) == 2
-    assert phases[0].env_config.robot_enabled is False
-    assert phases[1].env_config.robot_enabled is True
-    assert phases[1].env_config.reward_noise_std == 0.5
-
-    train(config=cfg, phases=phases)
-
-
-def test_train_from_pretrained(tmp_path) -> None:
-    """Test resuming/fine-tuning training from a pretrained agent state."""
-
-    cfg = AgentConfig(
-        env=EnvConfig(),
-        perception=PerceptionConfig(),
-        memory=MemoryConfig(),
-        decision=DecisionConfig(epsilon_start=1, epsilon_min=1),
-        learning=LearningConfig(),
-        meta=MetaConfig(),
+        agent=agent_config,
         n_episodes=2,
         n_steps_episode=20,
-        log_events=False,
-        save_state=False,
+        save_output=False,
     )
 
-    phases = load_phases(base_config=cfg, json_path=None)
 
-    # 1. Sauvegarde d'un état d'agent initial dans un dossier temporaire
-    pretrained_dir = str(tmp_path / "pretrained_agent")
-    env = gym.make(id=cfg.env_id, config=cfg.env)
+def test_total_steps() -> None:
+    """The total number of training steps is episodes * steps per episode."""
+
+    config = Config(n_episodes=3, n_steps_episode=10)
+    assert config.total_steps == 30
+
+
+def test_train(tmp_path, monkeypatch) -> None:
+    """A short training run completes and serializes the config and agent state."""
+
+    monkeypatch.chdir(tmp_path)
+    config = _make_config()
+
+    train(config=config)
+
+
+def test_train_from_pretrained(tmp_path, monkeypatch) -> None:
+    """Training can resume from a previously saved config and agent state."""
+
+    monkeypatch.chdir(tmp_path)
+    config = _make_config()
+
+    # 1. Save an initial config and agent state to a directory
+    pretrained_dir = tmp_path / "pretrained"
+    pretrained_dir.mkdir()
+
+    env = gym.make(id=config.env_id, config=config.env)
     agent = create_agent(
-        config=cfg, sample_obs=env.observation_space.sample(), rng=env.np_random
+        config=config,
+        sample_obs=env.observation_space.sample(),
+        rng=env.np_random,
     )
-    agent.save_state(dir=pretrained_dir)
+    config.serialize(dir=str(pretrained_dir))
+    agent.serialize(dir=str(pretrained_dir))
     env.close()
 
-    # 2. Entraînement à partir de l'état pré-entraîné
-    train(
-        config=cfg,
-        phases=phases,
-        pretrained_state_dir=pretrained_dir,
-    )
+    # 2. Resume training from the pretrained state
+    config.load_dir = str(pretrained_dir)
+    train(config=config)
 
 
 def test_save_load_config(tmp_path) -> None:
-    """Test saving and loading configuration from disk."""
+    """A configuration round-trips through disk serialization."""
 
-    cfg = AgentConfig(
-        env=EnvConfig(),
-        perception=PerceptionConfig(),
-        memory=MemoryConfig(),
-        decision=DecisionConfig(),
-        learning=LearningConfig(),
-        meta=MetaConfig(),
-    )
+    config = _make_config()
+    config.serialize(dir=str(tmp_path))
 
-    save_cfg(config=cfg, dir=tmp_path)
-    cfg_loaded = load_cfg(dir=tmp_path)
+    loaded = Config()
+    loaded.deserialize(dir=str(tmp_path))
 
-    assert cfg_loaded == cfg
+    assert loaded.agent == config.agent
+    assert loaded.env == config.env
