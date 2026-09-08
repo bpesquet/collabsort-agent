@@ -8,18 +8,19 @@ import gymnasium as gym
 import tyro
 from gym_collabsort.config import Action, RenderMode
 
-from collabsort_agent.config import load_cfg
+from collabsort_agent.config import Config
 from collabsort_agent.train import create_agent
 
 
-def demo(train_dir: str) -> None:
+def demo(load_dir: str) -> None:
     """Demonstrates a previously trained agent"""
 
-    if not Path(train_dir).is_dir():
-        raise NotADirectoryError(f"Invalid path '{train_dir}'")
+    if not Path(load_dir).is_dir():
+        raise NotADirectoryError(f"Invalid loading path '{load_dir}'")
 
     # Load config used for training
-    config = load_cfg(dir=train_dir)
+    config = Config()
+    config.deserialize(dir=load_dir)
 
     # Switch configuration to demo mode
     config.env.render_mode = RenderMode.HUMAN
@@ -31,7 +32,7 @@ def demo(train_dir: str) -> None:
     agent = create_agent(
         config=config, sample_obs=env.observation_space.sample(), rng=env.np_random
     )
-    agent.load_state(dir=train_dir)
+    agent.deserialize(dir=load_dir)
 
     # Reset environment
     obs, _ = env.reset()

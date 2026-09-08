@@ -2,388 +2,114 @@
 Train an agent.
 """
 
-import copy
-import json
-import os
 import time
-from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
 
 import gymnasium as gym
-import matplotlib
-import numpy as np
-import torch
 import tyro
-from gym_collabsort.config import Action, RobotStrategy
-from gym_collabsort.config import Config as EnvConfig
+from gym_collabsort.config import Action
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
-from collabsort_agent.config import load_cfg
-
-matplotlib.use("Agg")
-
-from collabsort_agent.common import EpisodeMetrics, create_agent
-from collabsort_agent.config import Config, save_cfg
-from collabsort_agent.decision.epsilon_greedy import EpsilonGreedy
-from collabsort_agent.metrics_tracker import HeatmapTracker
-from collabsort_agent.optimal_rewards import EpisodeTrajectory, compute_optimal_reward
+from collabsort_agent.agent_factory import create_agent
+from collabsort_agent.config import Config
+from collabsort_agent.metrics import EpisodeMetrics
 
 
-@dataclass
-class CurriculumPhase:
-    """A phase in the curriculum learning process"""
-
-    name: str
-    n_episodes: int
-    env_config: EnvConfig
-
-
-@dataclass
-class TrainArgs:
-    """Arguments for training."""
-
-    config: Config
-    curriculum_file: str | None = None
-    pretrained_state_dir: str | None = None
-
-
-def load_phases(
-    base_config: Config, json_path: str | None, pretrained_state_dir: str | None = None
-) -> list[CurriculumPhase]:
-    """Load curriculum phases from a JSON file and update base_config treadmills."""
-
-    phases = []
-    all_active_treadmills = set(base_config.env.active_treadmills)
-
-    if json_path is None:
-        phases.append(
-            CurriculumPhase(
-                name="Default Phase",
-                n_episodes=base_config.n_episodes,
-                env_config=copy.deepcopy(base_config.env),
-            )
-        )
-    else:
-        print(f"Loading curriculum from {json_path}...")
-        with open(json_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        for phase_data in data:
-            env_config = copy.deepcopy(base_config.env)
-
-            # Apply overrides
-            for k, v in phase_data.get("env_overrides", {}).items():
-                if k == "robot_strategy":
-                    v = RobotStrategy(v)
-                elif k == "active_treadmills":
-                    v = tuple(v)  # Ensure it is a tuple as expected by the environment
-                    all_active_treadmills.update(v)
-                setattr(env_config, k, v)
-
-            phases.append(
-                CurriculumPhase(
-                    name=phase_data["name"],
-                    n_episodes=phase_data["n_episodes"],
-                    env_config=env_config,
-                )
-            )
-
-    if pretrained_state_dir is not None and os.path.exists(pretrained_state_dir):
-        pretrained_cfg = load_cfg(dir=pretrained_state_dir)
-        all_active_treadmills.update(pretrained_cfg.env.active_treadmills)
-        base_config.perception = pretrained_cfg.perception
-        base_config.memory = pretrained_cfg.memory
-        print(
-            "Perception and Memory configs overridden by the pretrained model's config."
-        )
-
-    # Crucial step for zero-padding: the agent's initial perceiver must have ALL treadmills
-    # that will be used across the entire curriculum, to initialize the correct network size.
-    base_config.env.active_treadmills = tuple(sorted(all_active_treadmills))
-    print(
-        f"Agent's perceiver initialized with global active treadmills: {base_config.env.active_treadmills}"
-    )
-
-    if json_path is not None:
-        print(f"Successfully loaded {len(phases)} phases.")
-
-    return phases
-
-
-def train(
-    base_config: Config,
-    phases: list[CurriculumPhase],
-    pretrained_state_dir: str | None = None,
-) -> None:
-    """Execute training over one or multiple curriculum phases."""
-
-    # Allow PyTorch to use TF32 (tensor float 32) on Ampere+ GPUs.
-    torch.set_float32_matmul_precision("high")
-
-    # Determine if we are in curriculum mode
-    is_curriculum = len(phases) > 1
-    prefix = "train_curriculum" if is_curriculum else "train"
+def train(config: Config) -> None:
+    """Execute one training run of the agent"""
 
     # Create directory path for training output
-    train_dir = f"runs/{prefix}_{int(time.time())}_{base_config.decision.algorithm}_{base_config.learning.algorithm}"
+    time_str = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
+    train_dir = f"runs/train_{time_str}_{config.agent.decision.algorithm}_{config.agent.learning.algorithm}"
 
-    logger = None
-    if base_config.log_events:
-        logger = SummaryWriter(f"{train_dir}", flush_secs=60)
+    # Create logger
+    logger = SummaryWriter(f"{train_dir}", flush_secs=60)
 
-    # Temporary environment to sample observation space for agent creation
-    # We use base_config.env because it has been updated in load_phases to include all
-    # treadmills across the curriculum, ensuring the agent is sized for the max observation.
-    temp_env = gym.make(id=base_config.env_id, config=base_config.env)
+    if config.load_dir is not None:
+        if not Path(config.load_dir).is_dir():
+            raise NotADirectoryError(f"Invalid loading path '{config.load_dir}'")
+
+        # Load configuration from previously saved run
+        config.deserialize(dir=config.load_dir)
+
+    # Create environment
+    env = gym.make(id=config.env_id, config=config.env)
 
     # Create agent
     agent = create_agent(
-        config=base_config,
-        sample_obs=temp_env.observation_space.sample(),
-        rng=temp_env.np_random,
+        config=config,
+        sample_obs=env.observation_space.sample(),
+        rng=env.np_random,
     )
 
-    if pretrained_state_dir is not None:
-        print(f"Loading pretrained agent state from: {pretrained_state_dir}")
-        agent.load_state(dir=pretrained_state_dir)
+    if config.load_dir is not None:
+        # Load agent state from previously saved run
+        agent.deserialize(dir=config.load_dir)
 
-    # Calculate total training steps across all phases for exploration decay reset
-    total_training_steps = sum(
-        p.n_episodes * base_config.n_steps_episode for p in phases
-    )
-
-    # Reset exploration decay if using curriculum and not resetting per phase
-    if (
-        is_curriculum
-        and not base_config.decision.reset_exploration_per_phase
-        and isinstance(agent.deliberator, EpsilonGreedy)
-    ):
-        agent.deliberator.exploration_decay.reset(total_steps=total_training_steps)
-
-    temp_env.close()
-
-    # Initialize global training step and episode counters
-    global_training_step: int = 0
-    global_episode: int = 0
+    # Initialize time-related values
+    training_step: int = 0  # Number of time steps since beginning of training
     start_time = time.time()
-    heatmap_tracker = HeatmapTracker(log_freq=20)
 
-    # Loop over each curriculum phase
-    for phase_idx, phase in enumerate(phases):
-        if is_curriculum:
-            print(f"\n{'=' * 50}")
-            print(f"Starting Phase {phase_idx + 1}/{len(phases)}: {phase.name}")
-            print(f"{'=' * 50}\n")
+    # Global loop
+    for episode in trange(config.n_episodes, desc="Training progress"):
+        # Reset environment and metrics for new episode
+        obs, _ = env.reset()
+        ep_metrics = EpisodeMetrics()
+        ep_over: bool = False
 
-        # Reset agent's exploration decay if required by configuration
-        if is_curriculum and base_config.decision.reset_exploration_per_phase:
-            phase_steps = max(1, phase.n_episodes * base_config.n_steps_episode)
-            agent.deliberator.reset_for_phase(phase_steps=phase_steps)
-
-        # Create the environment for this specific phase
-        env = gym.make(id=base_config.env_id, config=phase.env_config)
-        agent.reset()
-
-        # If the agent's memory requires past-state input, perform a dummy call to get_extended_state to ensure the memory is initialized correctly.
-        if agent.memory.requires_past_state():
-            sample_obs = env.observation_space.sample()
-            sample_sensory = agent.perceiver.get_sensory_state(obs=sample_obs)
-            expected_size = len(agent.perceiver.get_past_state(obs=sample_obs))
-            agent.memory.get_extended_state(
-                sensory_state=sample_sensory,
-                expected_past_state_size=expected_size,
+        # Episode loop
+        while not ep_over:
+            # Agent chooses an action
+            action: Action = agent.act(
+                obs=obs,
+                training_step=training_step,
             )
 
-        phase_training_step = 0
-        desc = f"Phase {phase_idx + 1}" if is_curriculum else "Training progress"
+            # Take action and observe result
+            next_obs, reward, terminated, truncated, info = env.step(action=action)
+            reward: float = float(reward)
 
-        # Loop over episodes for this phase
-        for _ in trange(phase.n_episodes, desc=desc):
-            # Reset environment for new episode
-            obs, _ = env.reset()
-            ep_metrics = EpisodeMetrics()
-            action_history: list[int] = []
-            ep_over: bool = False
-            episode_visitation = np.zeros(base_config.env.n_rows + 1, dtype=np.int32)
-            episode_collisions = np.zeros(base_config.env.n_rows + 1, dtype=np.int32)
-            episode_spatial_actions: dict[int, dict[int, int]] = {}
-
-            trajectory = EpisodeTrajectory()
-
-            # Previous action string for oscillation counting
-            prev_action_str: str | None = None
-
-            # Episode loop
-            while not ep_over:
-                # Extract agent row for spatial tracking
-                agent_row = int(obs["self"]["coords"][0])
-
-                # Record visitation
-                if 1 <= agent_row <= base_config.env.n_rows:
-                    episode_visitation[agent_row] += 1
-
-                # Record state for the optimal rewards
-                arm_base_col = int(obs["self"]["coords"][1])
-                trajectory.record(
-                    obs=obs,
-                    active_agent_rewards=base_config.env.agent_rewards,
-                    arm_base_col=arm_base_col,
-                )
-
-                # Agent chooses an action
-                decision_step = (
-                    phase_training_step
-                    if (
-                        is_curriculum
-                        and base_config.decision.reset_exploration_per_phase
-                    )
-                    else global_training_step
-                )
-                action: Action = agent.act(obs=obs, training_step=decision_step)
-
-                # Count oscillations (UP/DOWN direction changes)
-                current_action_str = action.name
-
-                if prev_action_str is not None and (
-                    (prev_action_str == "UP" and current_action_str == "DOWN")
-                    or (prev_action_str == "DOWN" and current_action_str == "UP")
-                ):
-                    ep_metrics.oscillations += 1
-
-                prev_action_str = current_action_str
-                if current_action_str in ("UP", "DOWN"):
-                    ep_metrics.movement_actions += 1
-
-                action_idx = int(action.value)
-                action_history.append(action_idx)
-
-                if agent_row not in episode_spatial_actions:
-                    episode_spatial_actions[agent_row] = {}
-                if action_idx not in episode_spatial_actions[agent_row]:
-                    episode_spatial_actions[agent_row][action_idx] = 0
-                episode_spatial_actions[agent_row][action_idx] += 1
-
-                # Take action and observe result
-                next_obs, reward, terminated, truncated, info = env.step(action=action)
-                reward = float(reward)
-
-                # Use this experience to update agent
-                agent.update(
-                    next_obs=next_obs, reward=reward, done=terminated or truncated
-                )
-
-                # Update episode metrics
-                ep_metrics.reward += reward
-                ep_metrics.collisions += info["n_collisions"]
-                ep_metrics.collected_objects += info["n_placed_objects"]
-                ep_metrics.robot_collected_objects += info.get(
-                    "robot_placed_objects", 0
-                )
-                ep_metrics.missed_objects += info.get("n_fallen_objects", 0)
-
-                if info.get("agent_picked_value") is not None:
-                    ep_metrics.picked_values.append(info["agent_picked_value"])
-
-                if (
-                    info.get("agent_collision")
-                    and 1 <= agent_row <= base_config.env.n_rows
-                ):
-                    episode_collisions[agent_row] += 1
-
-                ep_metrics.step += 1
-
-                # Move to next state
-                phase_training_step += 1
-                global_training_step += 1
-                obs = next_obs
-                ep_over = (
-                    terminated
-                    or truncated
-                    or ep_metrics.step >= base_config.n_steps_episode
-                )
-
-            # Compute optimal theoretical reward
-            optimal_reward, opt_actions = compute_optimal_reward(
-                trajectory, base_config
+            # Use this experience to update agent
+            agent.update(
+                next_obs=next_obs,
+                reward=reward,
+                done=terminated or truncated,
             )
 
-            ep_metrics.optimal_reward = float(optimal_reward)
+            # Update episode metrics
+            ep_metrics.agent.reward += reward
+            ep_metrics.agent.actions.append(action.value)
+            ep_metrics.n_collisions += info["n_collisions"]
+            ep_metrics.n_missed_objects += info["n_fallen_objects"]
+            ep_metrics.step += 1
 
-            # Compute agent action counts and optimal action matches
-            agent_counts: dict[str, int] = {}
-            for a_idx in action_history:
-                name = Action(int(a_idx)).name
-                agent_counts[name] = agent_counts.get(name, 0) + 1
-
-            optimal_matches_by_action: dict[str, int] = {}
-            optimal_action_matches = 0
-            min_len = min(len(action_history), len(opt_actions))
-            for i in range(min_len):
-                ah = int(action_history[i])
-                oh = int(opt_actions[i])
-
-                if ah == oh:
-                    name = Action(ah).name
-                    optimal_matches_by_action[name] = (
-                        optimal_matches_by_action.get(name, 0) + 1
-                    )
-                    optimal_action_matches += 1
-
-            ep_metrics.agent_action_counts = agent_counts
-            ep_metrics.optimal_matches_by_action = optimal_matches_by_action
-            ep_metrics.optimal_action_matches = optimal_action_matches
-
-            # Log episode data globally
-            ep_metrics.sps = int(
-                global_training_step / max(1, time.time() - start_time)
-            )
-            ep_metrics.log(logger=logger, episode=global_episode)
-            agent.log_episode(logger=logger, episode=global_episode)
-
-            # --- HEATMAPS ---
-            n_actions = len(Action)
-
-            heatmap_tracker.update(
-                action_history=action_history,
-                picked_values=ep_metrics.picked_values,
-                episode_visitation=episode_visitation,
-                episode_collisions=episode_collisions,
-                spatial_actions=episode_spatial_actions,
-                n_actions=n_actions,
-            )
-            heatmap_tracker.log_heatmaps(
-                logger=logger, episode=global_episode, n_actions=n_actions
+            # Move to next state
+            training_step += 1
+            obs = next_obs
+            ep_over = (
+                terminated or truncated or ep_metrics.step >= config.n_steps_episode
             )
 
-            # Increment global episode counter
-            global_episode += 1
+        # Log episode metrics
+        ep_metrics.sps = int(training_step / (time.time() - start_time))
+        ep_metrics.log(
+            logger=logger,
+            episode=episode,
+        )
 
-        # Close the environment for this phase
-        env.close()
+    env.close()
+    logger.close()
 
-    if base_config.save_state:
-        agent.save_state(dir=train_dir)
-        save_cfg(config=base_config, dir=train_dir)
-        print(f"\nTraining completed. State saved in {train_dir}")
-
-    if logger is not None:
-        logger.close()
+    # Serialize config and agent state
+    config.serialize(dir=train_dir)
+    agent.serialize(dir=train_dir)
 
 
-if __name__ == "__main__":
-    # Load configuration and arguments from CLI
-    args: TrainArgs = tyro.cli(TrainArgs)
-
-    # Build the curriculum phases from the JSON file
-    curriculum_phases = load_phases(
-        base_config=args.config,
-        json_path=args.curriculum_file,
-        pretrained_state_dir=args.pretrained_state_dir,
-    )
+if __name__ == "__main__":  # pragma: no cover
+    # Load configuration from CLI
+    config: Config = tyro.cli(Config)
 
     # Launch the training process
-    train(
-        base_config=args.config,
-        phases=curriculum_phases,
-        pretrained_state_dir=args.pretrained_state_dir,
-    )
+    train(config=config)

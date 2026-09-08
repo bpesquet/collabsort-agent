@@ -2,13 +2,57 @@
 Agent definitions.
 """
 
+from __future__ import annotations
+
+import pickle
+from dataclasses import dataclass, field
+from typing import ClassVar
+
 import numpy as np
 from gym_collabsort.config import Action
 from torch.utils.tensorboard import SummaryWriter
 
-from collabsort_agent.decision import Deliberator
-from collabsort_agent.memory import Memory
-from collabsort_agent.perception import Perceiver
+from collabsort_agent.decision import DecisionConfig, Deliberator
+from collabsort_agent.learning import LearningConfig
+from collabsort_agent.memory import Memory, MemoryConfig
+from collabsort_agent.metacognition import MetaConfig
+from collabsort_agent.perception import Perceiver, PerceptionConfig
+
+
+@dataclass
+class AgentConfig:
+    """Agent configuration"""
+
+    # Perception configuration
+    perception: PerceptionConfig = field(default_factory=PerceptionConfig)
+
+    # Memory configuration
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
+
+    # Decision configuration
+    decision: DecisionConfig = field(default_factory=DecisionConfig)
+
+    # Learning configuration
+    learning: LearningConfig = field(default_factory=LearningConfig)
+
+    # Metacognition configuration
+    meta: MetaConfig = field(default_factory=MetaConfig)
+
+    # File name used to (de)serialize a configuration object
+    serialization_filename: ClassVar[str] = "agent_config.pkl"
+
+    def serialize(self, dir: str) -> None:
+        """Save a configuration object to disk"""
+
+        with open(file=f"{dir}/{self.serialization_filename}", mode="wb") as file:
+            pickle.dump(obj=self, file=file)
+
+    @classmethod
+    def deserialize(cls, dir: str) -> AgentConfig:
+        """Load a configuration object from disk"""
+
+        with open(file=f"{dir}/{cls.serialization_filename}", mode="rb") as file:
+            return pickle.load(file=file)
 
 
 class Agent:
@@ -24,33 +68,8 @@ class Agent:
         # Current extended state (sensory + memory)
         self.current_extended_state: np.ndarray | None = None
 
-        # Current transition context needed by memory updates
-        self.current_past_state: np.ndarray | None = None
-        self.current_agent_position: tuple[int, int] | None = None
-        self.current_robot_position: tuple[int, int] | None = None
-
         # Newest action chosen by the agent
         self.current_action: Action | None = None
-
-        # Cached next state to prevent double-updating memory modules
-        self.next_extended_state: np.ndarray | None = None
-        self.next_past_state: np.ndarray | None = None
-        self.next_agent_position: tuple[int, int] | None = None
-        self.next_robot_position: tuple[int, int] | None = None
-
-    def reset(self) -> None:
-        """Reset agent state at the beginning of a new episode"""
-
-        self.memory.reset()
-        self.current_extended_state = None
-        self.current_past_state = None
-        self.current_agent_position = None
-        self.current_robot_position = None
-        self.current_action = None
-        self.next_extended_state = None
-        self.next_past_state = None
-        self.next_agent_position = None
-        self.next_robot_position = None
 
     def act(
         self,
@@ -59,30 +78,12 @@ class Agent:
     ) -> Action:
         """Select an action"""
 
-        if self.next_extended_state is not None:
-            extended_state = self.next_extended_state
-            self.current_past_state = self.next_past_state
-            self.current_agent_position = self.next_agent_position
-            self.current_robot_position = self.next_robot_position
-            self.next_extended_state = None
-            self.next_past_state = None
-            self.next_agent_position = None
-            self.next_robot_position = None
-        else:
-            future_state = self.perceiver.get_sensory_state(obs=obs)
-            self.current_agent_position = tuple(obs["self"]["coords"])
-            self.current_robot_position = tuple(obs["robot"])
-
-            if self.memory.requires_past_state():
-                past_state = self.perceiver.get_past_state(obs=obs)
-                self.current_past_state = past_state
-            else:
-                self.current_past_state = None
-
-            extended_state = self.memory.get_extended_state(sensory_state=future_state)
+        sensory_state = self.perceiver.get_sensory_state(obs=obs)
+        extended_state = self.memory.get_extended_state(sensory_state=sensory_state)
 
         self.current_extended_state = extended_state
 
+        # Choose the next action to perform
         self.current_action = Action(
             self.deliberator.choose_action(
                 state=extended_state,
@@ -94,26 +95,11 @@ class Agent:
     def update(self, next_obs: dict, reward: float, done: bool) -> None:
         """Update agent after an action"""
 
-        if self.current_extended_state is None or self.current_action is None:
-            raise RuntimeError("Trying to update agent with non-existent state")
+        if self.current_extended_state is None or not self.current_action:
+            raise ValueError("Trying to update agent with non-existent state")
 
-        # Compute next sensory state first, then update memory with the current transition.
+        # Compute next extended state (sensory + memory) for the transition
         next_sensory_state = self.perceiver.get_sensory_state(obs=next_obs)
-
-        if (
-            hasattr(self.memory, "store_transition")
-            and self.current_past_state is not None
-            and self.current_agent_position is not None
-            and self.current_robot_position is not None
-        ):
-            self.memory.store_transition(
-                past_state=self.current_past_state,
-                action=self.current_action.value,
-                reward=reward,
-                agent_position=self.current_agent_position,
-                robot_position=self.current_robot_position,
-            )
-
         next_extended_state = self.memory.get_extended_state(
             sensory_state=next_sensory_state
         )
@@ -127,22 +113,6 @@ class Agent:
             done=done,
         )
 
-        # Recalibrate decision confidence with the outcome of this transition
-        # (extension 5: outcome-based confidence calibration). No-op for
-        # deliberators/estimators that don't support it.
-        self.deliberator.update_calibration(
-            td_error=self.deliberator.estimator.last_td_error
-        )
-
-        self.next_extended_state = next_extended_state
-        self.next_agent_position = tuple(next_obs["self"]["coords"])
-        self.next_robot_position = tuple(next_obs["robot"])
-
-        if self.memory.requires_past_state():
-            self.next_past_state = self.perceiver.get_past_state(obs=next_obs)
-        else:
-            self.next_past_state = None
-
     def log_episode(self, logger: SummaryWriter | None, episode: int) -> None:
         """Log agent information after an episode"""
 
@@ -150,13 +120,13 @@ class Agent:
             self.deliberator.log_episode(logger=logger, episode=episode)
             self.deliberator.estimator.log_episode(logger=logger, episode=episode)
 
-    def save_state(self, dir: str) -> None:
+    def serialize(self, dir: str) -> None:
         """Save the agent state to disk"""
 
         self.deliberator.save_state(dir=dir)
         self.deliberator.estimator.save_state(dir=dir)
 
-    def load_state(self, dir: str) -> None:
+    def deserialize(self, dir: str) -> None:
         """Load the agent state from disk"""
 
         self.deliberator.estimator.load_state(dir=dir)

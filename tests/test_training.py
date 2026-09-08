@@ -5,10 +5,10 @@ Unit tests for training and curriculum learning.
 import json
 
 import gymnasium as gym
+from collabsort_agent.common import create_agent
 from gym_collabsort.config import Config as EnvConfig
 
-from collabsort_agent.common import create_agent
-from collabsort_agent.config import Config, load_cfg, save_cfg
+from collabsort_agent.config import AgentConfig, load_cfg, save_cfg
 from collabsort_agent.decision import DecisionConfig
 from collabsort_agent.learning import LearningConfig
 from collabsort_agent.memory import MemoryConfig
@@ -33,7 +33,7 @@ def test_compute_total_training_steps() -> None:
 def test_random_agent() -> None:
     """Test a standard training loop (single default phase)."""
 
-    cfg = Config(
+    cfg = AgentConfig(
         env=EnvConfig(),
         perception=PerceptionConfig(),
         memory=MemoryConfig(),
@@ -49,7 +49,7 @@ def test_random_agent() -> None:
     phases = load_phases(base_config=cfg, json_path=None)
     assert len(phases) == 1
 
-    train(base_config=cfg, phases=phases)
+    train(config=cfg, phases=phases)
 
 
 def test_train_curriculum(tmp_path) -> None:
@@ -76,7 +76,7 @@ def test_train_curriculum(tmp_path) -> None:
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(dummy_phases, f)
 
-    cfg = Config(
+    cfg = AgentConfig(
         env=EnvConfig(),
         perception=PerceptionConfig(),
         memory=MemoryConfig(),
@@ -96,13 +96,13 @@ def test_train_curriculum(tmp_path) -> None:
     assert phases[1].env_config.robot_enabled is True
     assert phases[1].env_config.reward_noise_std == 0.5
 
-    train(base_config=cfg, phases=phases)
+    train(config=cfg, phases=phases)
 
 
 def test_train_from_pretrained(tmp_path) -> None:
     """Test resuming/fine-tuning training from a pretrained agent state."""
 
-    cfg = Config(
+    cfg = AgentConfig(
         env=EnvConfig(),
         perception=PerceptionConfig(),
         memory=MemoryConfig(),
@@ -128,7 +128,7 @@ def test_train_from_pretrained(tmp_path) -> None:
 
     # 2. Entraînement à partir de l'état pré-entraîné
     train(
-        base_config=cfg,
+        config=cfg,
         phases=phases,
         pretrained_state_dir=pretrained_dir,
     )
@@ -137,7 +137,7 @@ def test_train_from_pretrained(tmp_path) -> None:
 def test_save_load_config(tmp_path) -> None:
     """Test saving and loading configuration from disk."""
 
-    cfg = Config(
+    cfg = AgentConfig(
         env=EnvConfig(),
         perception=PerceptionConfig(),
         memory=MemoryConfig(),
