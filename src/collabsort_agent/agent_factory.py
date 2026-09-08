@@ -62,8 +62,8 @@ def create_agent(config: Config, sample_obs: dict, rng: np.random.Generator) -> 
     )
 
     sample_sensory_state = perceiver.get_sensory_state(obs=sample_obs)
-    sample_extended_state = (
-        memory.get_extended_state(sensory_state=sample_sensory_state),
+    sample_extended_state = memory.get_extended_state(
+        sensory_state=sample_sensory_state
     )
     extended_state_size = len(sample_extended_state)
     n_actions = len(Action) + n_memory_actions
