@@ -34,7 +34,8 @@ class Config:
     # Maximal number of steps in an episode
     n_steps_episode: int = 1000
 
-    # Directory used to load a previously saved configuration
+    # Directory used to load a previously saved configuration.
+    # If None, a fresh non-trained agent will be used
     load_dir: str | None = None
 
     # Flag for saving agent state, configuration and metrics to disk

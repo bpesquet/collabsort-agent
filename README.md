@@ -41,11 +41,11 @@ This project is built and tested with the following software:
 ### Useful commands
 
 ```bash
-# Format all Python files
-uvx ruff format
+# Format all Python files (or only check for non-formatted files with --check)
+uvx ruff format [--check]
 
-# Lint all Python files and fix any fixable errors
-uvx ruff check --fix
+# Lint all Python files (and fix any fixable errors with --fix)
+uvx ruff check [--fix]
 
 # Check for type-related mistakes
 uvx ty check
