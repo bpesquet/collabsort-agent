@@ -17,6 +17,38 @@ from collabsort_agent.config import Config
 from collabsort_agent.metrics import EpisodeMetrics
 
 
+def log_hyperparameters(
+    logger: SummaryWriter, config: Config, final_return: float
+) -> None:
+    """Log main hyperparameters and summary metric for a training run"""
+
+    # Log hyperparameters as a markdown table
+    logger.add_text(
+        tag="hyperparameters",
+        text_string="\n".join(
+            (
+                "| hyperparameter | value |",
+                "| --- | --- |",
+                f"| decision_algorithm | {config.agent.decision.algorithm} |",
+                f"| learning_algorithm | {config.agent.learning.algorithm} |",
+                f"| n_steps_episode | {config.n_steps_episode} |",
+                f"| n_episodes | {config.n_episodes} |",
+            )
+        ),
+        global_step=0,
+    )
+
+    # Log hyperparameters (kept in the same run directory via run_name=".")
+    logger.add_hparams(
+        hparam_dict={
+            "decision_algorithm": config.agent.decision.algorithm,
+            "learning_algorithm": config.agent.learning.algorithm,
+        },
+        metric_dict={"hparams/final_episodic_return": final_return},
+        run_name=".",
+    )
+
+
 def train(config: Config) -> None:
     """Execute one training run of the agent"""
 
@@ -110,15 +142,7 @@ def train(config: Config) -> None:
                 )
 
         if config.save_output:
-            # Record hyperparameters (kept in the same run directory via run_name=".")
-            logger.add_hparams(
-                hparam_dict={
-                    "decision_algorithm": config.agent.decision.algorithm,
-                    "learning_algorithm": config.agent.learning.algorithm,
-                },
-                metric_dict={"hparams/final_episodic_return": final_return},
-                run_name=".",
-            )
+            log_hyperparameters(logger, config, final_return)
 
             # Serialize config and agent state
             config.serialize(dir=train_dir)
