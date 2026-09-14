@@ -89,9 +89,14 @@ class Deliberator(ABC):
     def choose_action(
         self,
         state: np.ndarray,
-        training_step: int,
+        training_step: int | None,
     ) -> int:
-        """Choose the action to perform"""
+        """
+        Choose the action to perform.
+
+        training_step is None is used for non-training mode (demo),
+        in which the loaded exploration probability is not decayed.
+        """
 
     def reset_for_phase(self, phase_steps: int) -> None:
         """Reset any phase-dependent exploration state at the start of a new phase."""

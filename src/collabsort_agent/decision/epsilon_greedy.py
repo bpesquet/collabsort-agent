@@ -40,10 +40,15 @@ class EpsilonGreedy(Deliberator):
     def choose_action(
         self,
         state: np.ndarray,
-        training_step: int,
+        training_step: int | None,
     ) -> int:
-        # Update exploration probability
-        self.epsilon = self.exploration_decay.get_epsilon(training_step=training_step)
+        # Update exploration probability from the decay schedule.
+        # In demo mode (training_step is None), the loaded exploration probability
+        # is not decayed.
+        if training_step is not None:
+            self.epsilon = self.exploration_decay.get_epsilon(
+                training_step=training_step
+            )
 
         # With probability epsilon: explore (choose a random action)
         if self.rng.random() < self.epsilon:

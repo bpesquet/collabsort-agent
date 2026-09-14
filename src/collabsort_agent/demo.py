@@ -41,7 +41,8 @@ def demo(load_dir: str) -> None:
     # Episode loop
     while not ep_over:
         # Agent chooses an action
-        action: Action = agent.act(obs=obs, training_step=0)
+        # training_step is None means using loaded exploration probability (no decay)
+        action: Action = agent.act(obs=obs, training_step=None)
 
         # Take action and observe result
         next_obs, _, terminated, truncated, _ = env.step(action=action)

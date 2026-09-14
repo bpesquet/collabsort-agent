@@ -47,7 +47,7 @@ class ARD(Deliberator):
     def choose_action(
         self,
         state: np.ndarray,
-        training_step: int,
+        training_step: int | None,
     ) -> int:
         """Choose the action to perform"""
 

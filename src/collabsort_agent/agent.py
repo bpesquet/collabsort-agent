@@ -4,9 +4,7 @@ Agent definitions.
 
 from __future__ import annotations
 
-import pickle
 from dataclasses import dataclass, field
-from typing import ClassVar
 
 import numpy as np
 from gym_collabsort.config import Action
@@ -38,22 +36,6 @@ class AgentConfig:
     # Metacognition configuration
     meta: MetaConfig = field(default_factory=MetaConfig)
 
-    # File name used to (de)serialize a configuration object
-    serialization_filename: ClassVar[str] = "agent_config.pkl"
-
-    def serialize(self, dir: str) -> None:
-        """Save a configuration object to disk"""
-
-        with open(file=f"{dir}/{self.serialization_filename}", mode="wb") as file:
-            pickle.dump(obj=self, file=file)
-
-    @classmethod
-    def deserialize(cls, dir: str) -> AgentConfig:
-        """Load a configuration object from disk"""
-
-        with open(file=f"{dir}/{cls.serialization_filename}", mode="rb") as file:
-            return pickle.load(file=file)
-
 
 class Agent:
     """An agent interacting with its environment."""
@@ -74,7 +56,7 @@ class Agent:
     def act(
         self,
         obs: dict,
-        training_step: int,
+        training_step: int | None,
     ) -> Action:
         """Select an action"""
 
