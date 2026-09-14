@@ -18,7 +18,7 @@ from collabsort_agent.metrics import EpisodeMetrics
 
 
 def log_hyperparameters(
-    logger: SummaryWriter, config: Config, final_return: float
+    logger: SummaryWriter, config: Config, final_matrics: EpisodeMetrics
 ) -> None:
     """Log main hyperparameters and summary metric for a training run"""
 
@@ -44,7 +44,15 @@ def log_hyperparameters(
             "decision_algorithm": config.agent.decision.algorithm,
             "learning_algorithm": config.agent.learning.algorithm,
         },
-        metric_dict={"hparams/final_episodic_return": final_return},
+        metric_dict={
+            "run/reward": final_matrics.agent.reward + final_matrics.robot.reward,
+            "run/agent_reward": final_matrics.agent.reward,
+            "run/collected_objects_ratio": (
+                final_matrics.agent.n_collected_objects
+                + final_matrics.robot.n_collected_objects
+            )
+            / final_matrics.n_objects,
+        },
         run_name=".",
     )
 
@@ -81,9 +89,6 @@ def train(config: Config) -> None:
     training_step: int = 0  # Number of time steps since beginning of training
     start_time = time.time()
 
-    # Summary metric: agent's episodic return for the last completed episode
-    final_return: float = 0.0
-
     # Create logger
     logger = SummaryWriter(f"{train_dir}", flush_secs=60)
 
@@ -110,8 +115,6 @@ def train(config: Config) -> None:
                 # Update episode metrics
                 ep_metrics.agent.reward += reward
                 ep_metrics.agent.actions.append(action.value)
-                ep_metrics.n_collisions += info["n_collisions"]
-                ep_metrics.n_missed_objects += info["n_fallen_objects"]
                 ep_metrics.step += 1
 
                 # Use this experience to update agent
@@ -128,11 +131,14 @@ def train(config: Config) -> None:
                     terminated or truncated or ep_metrics.step >= config.n_steps_episode
                 )
 
-            # Compute steps per second for finished episode
+            # Record or compute metrics after end of episode
             ep_metrics.sps = int(training_step / (time.time() - start_time))
-
-            # Store symmary metric
-            final_return = ep_metrics.agent.reward
+            ep_metrics.n_collisions = info["n_collisions"]
+            ep_metrics.n_objects = info["n_objects"]
+            ep_metrics.n_missed_objects = info["n_fallen_objects"]
+            ep_metrics.agent.n_collected_objects = info["n_agent_placed_objects"]
+            ep_metrics.robot.n_collected_objects = info["n_robot_placed_objects"]
+            ep_metrics.robot.reward = info["robot_ep_reward"]
 
             if config.save_output:
                 # Log episode metrics
@@ -142,7 +148,7 @@ def train(config: Config) -> None:
                 )
 
         if config.save_output:
-            log_hyperparameters(logger, config, final_return)
+            log_hyperparameters(logger, config, ep_metrics)
 
             # Serialize config and agent state
             config.serialize(dir=train_dir)

@@ -45,7 +45,7 @@ class ArmMetrics:
         """Log arm metrics at end of episode"""
 
         logger.add_scalar(
-            tag=f"{self.name}/episodic_return",
+            tag=f"{self.name}/reward",
             scalar_value=(self.reward),
             global_step=episode,
         )
@@ -83,8 +83,8 @@ class EpisodeMetrics:
     # Episode time step (= number of time steps since beginning of episode)
     step: int = 0
 
-    # Maximum possible reward (total value of all objects)
-    maximum_reward: float = 0.0
+    # Number of pickable objects (added to the board)
+    n_objects: int = 0
 
     # Number or missed objects (fallen from treadmills)
     n_missed_objects: int = 0
@@ -106,19 +106,40 @@ class EpisodeMetrics:
         self.agent.log(logger=logger, episode=episode)
         self.robot.log(logger=logger, episode=episode)
 
-        # Log collaboration and technical metrics
+        # Log collaboration metrics
         logger.add_scalar(
-            tag="n_missed_objects",
+            tag="collab/n_missed_objects",
             scalar_value=self.n_missed_objects,
             global_step=episode,
         )
         logger.add_scalar(
-            tag="n_collisions",
+            tag="collab/n_collisions",
             scalar_value=self.n_collisions,
             global_step=episode,
         )
         logger.add_scalar(
-            tag="steps_per_seconds",
+            tag="collab/reward",
+            scalar_value=self.agent.reward + self.robot.reward,
+            global_step=episode,
+        )
+        logger.add_scalar(
+            tag="collab/collected_objects_ratio",
+            scalar_value=(
+                self.agent.n_collected_objects + self.robot.n_collected_objects
+            )
+            / self.n_objects,
+            global_step=episode,
+        )
+        logger.add_scalar(
+            tag="agent/collected_objects_ratio",
+            scalar_value=self.agent.n_collected_objects
+            / (self.agent.n_collected_objects + self.robot.n_collected_objects),
+            global_step=episode,
+        )
+
+        # Log system metrics
+        logger.add_scalar(
+            tag="sys/steps_per_seconds",
             scalar_value=self.sps,
             global_step=episode,
         )
