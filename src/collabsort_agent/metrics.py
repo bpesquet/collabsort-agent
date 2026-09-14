@@ -10,6 +10,16 @@ from gym_collabsort.config import Action
 from torch.utils.tensorboard import SummaryWriter
 
 
+def safe_ratio(numerator: float, denominator: float) -> float:
+    """Return numerator / denominator, or 0.0 if denominator is zero.
+
+    Used for ratio metrics (e.g. collected objects) that can be legitimately
+    undefined early in training, when nothing has happened yet.
+    """
+
+    return numerator / denominator if denominator else 0.0
+
+
 def get_action_name(action: int) -> str:
     """Return the name associated to an action value"""
 
@@ -124,22 +134,24 @@ class EpisodeMetrics:
         )
         logger.add_scalar(
             tag="collab/collected_objects_ratio",
-            scalar_value=(
-                self.agent.n_collected_objects + self.robot.n_collected_objects
-            )
-            / self.n_objects,
+            scalar_value=safe_ratio(
+                self.agent.n_collected_objects + self.robot.n_collected_objects,
+                self.n_objects,
+            ),
             global_step=episode,
         )
         logger.add_scalar(
             tag="agent/collected_objects_ratio",
-            scalar_value=self.agent.n_collected_objects
-            / (self.agent.n_collected_objects + self.robot.n_collected_objects),
+            scalar_value=safe_ratio(
+                self.agent.n_collected_objects,
+                self.agent.n_collected_objects + self.robot.n_collected_objects,
+            ),
             global_step=episode,
         )
 
         # Log system metrics
         logger.add_scalar(
-            tag="sys/steps_per_seconds",
+            tag="sys/steps_per_second",
             scalar_value=self.sps,
             global_step=episode,
         )

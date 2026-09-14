@@ -3,8 +3,10 @@ Train an agent.
 """
 
 import time
+from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
+from statistics import mean
 
 import gymnasium as gym
 import tyro
@@ -14,20 +16,25 @@ from tqdm import trange
 
 from collabsort_agent.agent_factory import create_agent
 from collabsort_agent.config import Config
-from collabsort_agent.metrics import EpisodeMetrics
+from collabsort_agent.metrics import EpisodeMetrics, safe_ratio
+
+# Number of trailing episodes averaged for the run-level hparam metrics
+N_LAST_EPISODES = 5
 
 
 def log_hyperparameters(
-    logger: SummaryWriter, config: Config, final_matrics: EpisodeMetrics
+    logger: SummaryWriter,
+    config: Config,
+    recent_metrics: deque[EpisodeMetrics],
 ) -> None:
-    """Log main hyperparameters and summary metric for a training run"""
+    """Log main hyperparameters and summary metrics for a training run."""
 
     # Log hyperparameters as a markdown table
     logger.add_text(
         tag="hyperparameters",
         text_string="\n".join(
             (
-                "| hyperparameter | value |",
+                "| Hyperparameter | Value |",
                 "| --- | --- |",
                 f"| decision_algorithm | {config.agent.decision.algorithm} |",
                 f"| learning_algorithm | {config.agent.learning.algorithm} |",
@@ -38,20 +45,40 @@ def log_hyperparameters(
         global_step=0,
     )
 
+    # Average summary metrics over the trailing episodes (0.0 if none were
+    # completed, e.g. n_episodes=0)
+    mean_reward = (
+        mean(m.agent.reward + m.robot.reward for m in recent_metrics)
+        if recent_metrics
+        else 0.0
+    )
+    mean_agent_reward = (
+        mean(m.agent.reward for m in recent_metrics) if recent_metrics else 0.0
+    )
+    mean_collected_objects_ratio = (
+        mean(
+            safe_ratio(
+                m.agent.n_collected_objects + m.robot.n_collected_objects,
+                m.n_objects,
+            )
+            for m in recent_metrics
+        )
+        if recent_metrics
+        else 0.0
+    )
+
     # Log hyperparameters (kept in the same run directory via run_name=".")
     logger.add_hparams(
         hparam_dict={
             "decision_algorithm": config.agent.decision.algorithm,
             "learning_algorithm": config.agent.learning.algorithm,
+            "n_steps_episode": config.n_steps_episode,
+            "n_episodes": config.n_episodes,
         },
         metric_dict={
-            "run/reward": final_matrics.agent.reward + final_matrics.robot.reward,
-            "run/agent_reward": final_matrics.agent.reward,
-            "run/collected_objects_ratio": (
-                final_matrics.agent.n_collected_objects
-                + final_matrics.robot.n_collected_objects
-            )
-            / final_matrics.n_objects,
+            "hparam/reward": mean_reward,
+            "hparam/agent_reward": mean_agent_reward,
+            "hparam/collected_objects_ratio": mean_collected_objects_ratio,
         },
         run_name=".",
     )
@@ -91,6 +118,10 @@ def train(config: Config) -> None:
 
     # Create logger
     logger = SummaryWriter(f"{train_dir}", flush_secs=60)
+
+    # Metrics for the trailing episodes, used for the run-level hparam
+    # summary metrics logged at the end of training
+    recent_metrics: deque[EpisodeMetrics] = deque(maxlen=N_LAST_EPISODES)
 
     try:
         # Global loop
@@ -132,13 +163,15 @@ def train(config: Config) -> None:
                 )
 
             # Record or compute metrics after end of episode
-            ep_metrics.sps = int(training_step / (time.time() - start_time))
+            ep_metrics.sps = training_step / (time.time() - start_time)
             ep_metrics.n_collisions = info["n_collisions"]
             ep_metrics.n_objects = info["n_objects"]
             ep_metrics.n_missed_objects = info["n_fallen_objects"]
             ep_metrics.agent.n_collected_objects = info["n_agent_placed_objects"]
             ep_metrics.robot.n_collected_objects = info["n_robot_placed_objects"]
             ep_metrics.robot.reward = info["robot_ep_reward"]
+
+            recent_metrics.append(ep_metrics)
 
             if config.save_output:
                 # Log episode metrics
@@ -148,11 +181,11 @@ def train(config: Config) -> None:
                 )
 
         if config.save_output:
-            log_hyperparameters(logger, config, ep_metrics)
-
             # Serialize config and agent state
             config.serialize(dir=train_dir)
             agent.serialize(dir=train_dir)
+
+            log_hyperparameters(logger, config, recent_metrics)
 
     finally:
         # Always release the environment and flush/close the logger
