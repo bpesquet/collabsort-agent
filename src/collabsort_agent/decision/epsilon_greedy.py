@@ -60,7 +60,7 @@ class EpsilonGreedy(Deliberator):
 
     def log_episode(self, logger: SummaryWriter, episode: int) -> None:
         logger.add_scalar(
-            tag="decision/exploration_probability",
+            tag="agent/exploration_probability",
             scalar_value=self.epsilon,
             global_step=episode,
         )

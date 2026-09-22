@@ -21,6 +21,9 @@ from collabsort_agent.metrics import EpisodeMetrics, safe_ratio
 # Number of trailing episodes averaged for the run-level hparam metrics
 N_LAST_EPISODES = 5
 
+# File used to persist the training step count across saved runs
+TRAINING_STEP_FILENAME = "training_step.txt"
+
 
 def log_hyperparameters(
     logger: SummaryWriter,
@@ -108,12 +111,18 @@ def train(config: Config) -> None:
         rng=env.np_random,
     )
 
+    # Number of time steps since beginning of training
+    training_step: int = 0
     if config.load_dir is not None:
         # Load agent state from previously saved run
         agent.deserialize(dir=config.load_dir)
 
-    # Initialize time-related values
-    training_step: int = 0  # Number of time steps since beginning of training
+        # Restore training step count from previous training run.
+        # Necessary for coherent exploration probability decaying
+        training_step_file = Path(config.load_dir) / TRAINING_STEP_FILENAME
+        if training_step_file.is_file():
+            training_step = int(training_step_file.read_text())
+
     start_time = time.time()
 
     # Create logger
@@ -179,11 +188,15 @@ def train(config: Config) -> None:
                     logger=logger,
                     episode=episode,
                 )
+                # Log internal agent information
+                agent.log_episode(logger, episode)
 
         if config.save_output:
             # Serialize config and agent state
             config.serialize(dir=train_dir)
             agent.serialize(dir=train_dir)
+            # Serialize training step count
+            (Path(train_dir) / TRAINING_STEP_FILENAME).write_text(str(training_step))
 
             log_hyperparameters(logger, config, recent_metrics)
 
