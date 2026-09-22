@@ -27,7 +27,10 @@ uv run python src/collabsort_agent/train.py {options}
 uv run tensorboard --logdir runs/
 
 # Launch a demo of a trained agent identified by {train_dir}
-uv run python src/collabsort_agent/demo.py --train_dir runs/{train_dir}
+uv run python src/collabsort_agent/demo.py --load_dir runs/{train_dir}
+
+# Evaluate a trained agent identified by {train_dir} over a number of episodes
+uv run python src/collabsort_agent/eval.py --load_dir runs/{train_dir}
 ```
 
 ## Development notes

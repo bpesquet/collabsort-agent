@@ -48,8 +48,9 @@ class ARD(Deliberator):
         self,
         state: np.ndarray,
         training_step: int | None,
+        deterministic: bool = False,
     ) -> int:
-        """Choose the action to perform"""
+        """Choose the action to perform."""
 
         action_values = self.estimator.get_action_values(state=state)
 

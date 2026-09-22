@@ -90,12 +90,16 @@ class Deliberator(ABC):
         self,
         state: np.ndarray,
         training_step: int | None,
+        deterministic: bool = False,
     ) -> int:
         """
         Choose the action to perform.
 
-        training_step is None is used for non-training mode (demo),
+        An undefined training_step is used for non-training mode (demo),
         in which the loaded exploration probability is not decayed.
+
+        deterministic, when True, disables exploration and always returns
+        the greedy action. Used for evaluation.
         """
 
     def reset_for_phase(self, phase_steps: int) -> None:

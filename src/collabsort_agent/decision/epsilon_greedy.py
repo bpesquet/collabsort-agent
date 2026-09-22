@@ -41,20 +41,23 @@ class EpsilonGreedy(Deliberator):
         self,
         state: np.ndarray,
         training_step: int | None,
+        deterministic: bool = False,
     ) -> int:
-        # Update exploration probability from the decay schedule.
-        # In demo mode (training_step is None), the loaded exploration probability
-        # is not decayed.
-        if training_step is not None:
-            self.epsilon = self.exploration_decay.get_epsilon(
-                training_step=training_step
-            )
+        if not deterministic:
+            # Update exploration probability from the decay schedule.
+            # In demo mode (training_step is None), the loaded exploration probability
+            # is not decayed.
+            if training_step is not None:
+                self.epsilon = self.exploration_decay.get_epsilon(
+                    training_step=training_step
+                )
 
-        # With probability epsilon: explore (choose a random action)
-        if self.rng.random() < self.epsilon:
-            return int(np.random.randint(0, self.estimator.n_actions))
+            # With probability epsilon: explore (choose a random action)
+            if self.rng.random() < self.epsilon:
+                return int(np.random.randint(0, self.estimator.n_actions))
 
-        # With probability (1-epsilon): exploit (greedily choose the best known action)
+        # With probability (1-epsilon), or always when deterministic:
+        # exploit (greedily choose the best known action)
         action_values = self.estimator.get_action_values(state=state)
         return int(np.argmax(action_values).item())
 
