@@ -3,7 +3,6 @@ Train an agent.
 """
 
 import time
-from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
@@ -16,10 +15,8 @@ from tqdm import trange
 
 from collabsort_agent.agent_factory import create_agent
 from collabsort_agent.config import Config
+from collabsort_agent.eval import run_eval_episodes
 from collabsort_agent.metrics import EpisodeMetrics, safe_ratio
-
-# Number of trailing episodes averaged for the run-level hparam metrics
-N_LAST_EPISODES = 5
 
 # File used to persist the training step count across saved runs
 TRAINING_STEP_FILENAME = "training_step.txt"
@@ -28,9 +25,15 @@ TRAINING_STEP_FILENAME = "training_step.txt"
 def log_hyperparameters(
     logger: SummaryWriter,
     config: Config,
-    recent_metrics: deque[EpisodeMetrics],
+    eval_metrics: list[EpisodeMetrics],
 ) -> None:
-    """Log main hyperparameters and summary metrics for a training run."""
+    """
+    Log main hyperparameters and summary metrics for a training run.
+
+    Summary metrics (reward, agent_reward, collected_objects_ratio) are
+    computed only from the end-of-training evaluation phase, not from
+    training episodes, since training rewards are contaminated by exploration.
+    """
 
     # Log hyperparameters as a markdown table
     logger.add_text(
@@ -43,31 +46,10 @@ def log_hyperparameters(
                 f"| learning_algorithm | {config.agent.learning.algorithm} |",
                 f"| n_steps_episode | {config.n_steps_episode} |",
                 f"| n_episodes | {config.n_episodes} |",
+                f"| eval_n_episodes | {config.eval_n_episodes} |",
             )
         ),
         global_step=0,
-    )
-
-    # Average summary metrics over the trailing episodes (0.0 if none were
-    # completed, e.g. n_episodes=0)
-    mean_reward = (
-        mean(m.agent.reward + m.robot.reward for m in recent_metrics)
-        if recent_metrics
-        else 0.0
-    )
-    mean_agent_reward = (
-        mean(m.agent.reward for m in recent_metrics) if recent_metrics else 0.0
-    )
-    mean_collected_objects_ratio = (
-        mean(
-            safe_ratio(
-                m.agent.n_collected_objects + m.robot.n_collected_objects,
-                m.n_objects,
-            )
-            for m in recent_metrics
-        )
-        if recent_metrics
-        else 0.0
     )
 
     # Log hyperparameters (kept in the same run directory via run_name=".")
@@ -77,11 +59,20 @@ def log_hyperparameters(
             "learning_algorithm": config.agent.learning.algorithm,
             "n_steps_episode": config.n_steps_episode,
             "n_episodes": config.n_episodes,
+            "eval_n_episodes": config.eval_n_episodes,
         },
         metric_dict={
-            "hparam/reward": mean_reward,
-            "hparam/agent_reward": mean_agent_reward,
-            "hparam/collected_objects_ratio": mean_collected_objects_ratio,
+            "hparam/reward": mean(
+                m.agent.reward + m.robot.reward for m in eval_metrics
+            ),
+            "hparam/agent_reward": mean(m.agent.reward for m in eval_metrics),
+            "hparam/collected_objects_ratio": mean(
+                safe_ratio(
+                    m.agent.n_collected_objects + m.robot.n_collected_objects,
+                    m.n_objects,
+                )
+                for m in eval_metrics
+            ),
         },
         run_name=".",
     )
@@ -103,6 +94,13 @@ def train(config: Config) -> None:
 
     # Create environment
     env = gym.make(id=config.env_id, config=config.env)
+
+    # Separate environment instance for the end-of-training evaluation phase,
+    # so it doesn't disturb the training environment's episode state or RNG
+    # stream
+    eval_env = (
+        gym.make(id=config.env_id, config=config.env) if config.save_output else None
+    )
 
     # Create agent
     agent = create_agent(
@@ -127,10 +125,6 @@ def train(config: Config) -> None:
 
     # Create logger
     logger = SummaryWriter(f"{train_dir}", flush_secs=60)
-
-    # Metrics for the trailing episodes, used for the run-level hparam
-    # summary metrics logged at the end of training
-    recent_metrics: deque[EpisodeMetrics] = deque(maxlen=N_LAST_EPISODES)
 
     try:
         # Global loop
@@ -180,8 +174,6 @@ def train(config: Config) -> None:
             ep_metrics.robot.n_collected_objects = info["n_robot_placed_objects"]
             ep_metrics.robot.reward = info["robot_ep_reward"]
 
-            recent_metrics.append(ep_metrics)
-
             if config.save_output:
                 # Log episode metrics
                 ep_metrics.log(
@@ -198,11 +190,25 @@ def train(config: Config) -> None:
             # Serialize training step count
             (Path(train_dir) / TRAINING_STEP_FILENAME).write_text(str(training_step))
 
-            log_hyperparameters(logger, config, recent_metrics)
+            # Evaluation phase: run the trained agent greedily against a
+            # fixed, deterministic environment, so the hparam summary
+            # metrics reflect actual policy performance rather than
+            # exploration-noisy training rewards
+            eval_metrics = run_eval_episodes(
+                agent=agent,
+                env=eval_env,
+                n_steps_episode=config.n_steps_episode,
+                n_episodes=config.eval_n_episodes,
+                seed=config.eval_seed,
+            )
+
+            log_hyperparameters(logger, config, eval_metrics)
 
     finally:
-        # Always release the environment and flush/close the logger
+        # Always release the environments and flush/close the logger
         env.close()
+        if eval_env is not None:
+            eval_env.close()
         logger.close()
 
 

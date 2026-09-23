@@ -34,6 +34,14 @@ class Config:
     # Maximal number of steps in an episode
     n_steps_episode: int = 1000
 
+    # Number of episodes run in the greedy evaluation phase at the end of training
+    eval_n_episodes: int = 20
+
+    # Seed used to reset the evaluation environment before its first episode,
+    # kept fixed so evaluation always runs against the same deterministic
+    # conditions, for objective comparison across training runs
+    eval_seed: int = 42
+
     # Directory used to load a previously saved configuration.
     # If None, a fresh non-trained agent will be used
     load_dir: str | None = None
