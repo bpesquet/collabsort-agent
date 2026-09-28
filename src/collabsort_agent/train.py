@@ -13,6 +13,7 @@ from gym_collabsort.config import Action
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import trange
 
+from collabsort_agent.agent import Agent
 from collabsort_agent.agent_factory import create_agent
 from collabsort_agent.config import Config
 from collabsort_agent.eval import eval
@@ -75,6 +76,58 @@ def log_hyperparameters(
     )
 
 
+def train_episode(
+    agent: Agent,
+    env,
+    n_steps_episode: int,
+    training_step: int,
+) -> EpisodeMetrics:
+    """
+    Run a single training episode (with exploration and learning updates).
+
+    training_step is the global step count at the start of the episode;
+    the caller is responsible for advancing it by the returned metrics' step count.
+    """
+
+    obs, _ = env.reset()
+    ep_metrics = EpisodeMetrics()
+    ep_over = False
+
+    while not ep_over:
+        # Agent chooses an action
+        action: Action = agent.act(
+            obs=obs,
+            training_step=training_step + ep_metrics.step,
+        )
+
+        # Take action and observe result
+        next_obs, reward, terminated, truncated, info = env.step(action=action)
+        reward: float = float(reward)
+
+        ep_metrics.agent.reward += reward
+        ep_metrics.agent.actions.append(action.value)
+        ep_metrics.step += 1
+
+        # Use this experience to update agent
+        agent.update(
+            next_obs=next_obs,
+            reward=reward,
+            done=terminated or truncated,
+        )
+
+        obs = next_obs
+        ep_over = terminated or truncated or ep_metrics.step >= n_steps_episode
+
+    ep_metrics.n_collisions = info["n_collisions"]
+    ep_metrics.n_objects = info["n_objects"]
+    ep_metrics.n_missed_objects = info["n_fallen_objects"]
+    ep_metrics.agent.n_collected_objects = info["n_agent_placed_objects"]
+    ep_metrics.robot.n_collected_objects = info["n_robot_placed_objects"]
+    ep_metrics.robot.reward = info["robot_ep_reward"]
+
+    return ep_metrics
+
+
 def train(config: Config) -> None:
     """Execute one training run of the agent"""
 
@@ -123,52 +176,16 @@ def train(config: Config) -> None:
     try:
         # Global loop
         for episode in trange(config.n_training_episodes, desc="Training progress"):
-            # Reset environment and metrics for new episode
-            obs, _ = training_env.reset()
-            ep_metrics = EpisodeMetrics()
-            ep_over: bool = False
+            ep_metrics = train_episode(
+                agent=agent,
+                env=training_env,
+                n_steps_episode=config.n_steps_episode,
+                training_step=training_step,
+            )
 
-            # Episode loop
-            while not ep_over:
-                # Agent chooses an action
-                action: Action = agent.act(
-                    obs=obs,
-                    training_step=training_step,
-                )
-
-                # Take action and observe result
-                next_obs, reward, terminated, truncated, info = training_env.step(
-                    action=action
-                )
-                reward: float = float(reward)
-
-                # Update episode metrics
-                ep_metrics.agent.reward += reward
-                ep_metrics.agent.actions.append(action.value)
-                ep_metrics.step += 1
-
-                # Use this experience to update agent
-                agent.update(
-                    next_obs=next_obs,
-                    reward=reward,
-                    done=terminated or truncated,
-                )
-
-                # Move to next state
-                training_step += 1
-                obs = next_obs
-                ep_over = (
-                    terminated or truncated or ep_metrics.step >= config.n_steps_episode
-                )
-
-            # Record or compute metrics after end of episode
+            # Advance global step count and compute throughput
+            training_step += ep_metrics.step
             ep_metrics.sps = training_step / (time.time() - start_time)
-            ep_metrics.n_collisions = info["n_collisions"]
-            ep_metrics.n_objects = info["n_objects"]
-            ep_metrics.n_missed_objects = info["n_fallen_objects"]
-            ep_metrics.agent.n_collected_objects = info["n_agent_placed_objects"]
-            ep_metrics.robot.n_collected_objects = info["n_robot_placed_objects"]
-            ep_metrics.robot.reward = info["robot_ep_reward"]
 
             if config.save_output:
                 # Log episode metrics
