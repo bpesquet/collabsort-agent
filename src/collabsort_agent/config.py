@@ -29,13 +29,13 @@ class Config:
     agent: AgentConfig = field(default_factory=AgentConfig)
 
     # Number of training episodes
-    n_episodes: int = 300
+    n_training_episodes: int = 300
+
+    # Number of episodes run in the evaluation phase at the end of training
+    n_eval_episodes: int = 30
 
     # Maximal number of steps in an episode
     n_steps_episode: int = 1000
-
-    # Number of episodes run in the greedy evaluation phase at the end of training
-    eval_n_episodes: int = 20
 
     # Seed used to reset the evaluation environment before its first episode,
     # kept fixed so evaluation always runs against the same deterministic
@@ -46,14 +46,15 @@ class Config:
     # If None, a fresh non-trained agent will be used
     load_dir: str | None = None
 
-    # Flag for saving agent state, configuration and metrics to disk
+    # Flag for saving agent state, configuration and metrics to disk.
+    # Also governs evaluation at end of training.
     save_output: bool = True
 
     @property
     def total_steps(self) -> int:
         """Total number of training steps"""
 
-        return self.n_steps_episode * self.n_episodes
+        return self.n_steps_episode * self.n_training_episodes
 
     def serialize(self, dir: str) -> None:
         """Save a configuration object to disk"""

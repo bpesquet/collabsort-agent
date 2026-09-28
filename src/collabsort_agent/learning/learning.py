@@ -104,12 +104,12 @@ class ActionValueEstimator(ABC):
 
     def log_episode(self, logger: SummaryWriter, episode: int) -> None:
         logger.add_scalar(
-            tag="learning/mean_td_error",
+            tag="agent/mean_td_error",
             scalar_value=mean(self.losses),
             global_step=episode,
         )
         logger.add_scalar(
-            tag="learning/mean_q_value",
+            tag="agent/mean_q_value",
             scalar_value=mean(self.mean_q_values),
             global_step=episode,
         )

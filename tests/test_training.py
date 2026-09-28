@@ -30,7 +30,7 @@ def _make_config() -> Config:
     return Config(
         env=EnvConfig(),
         agent=agent_config,
-        n_episodes=2,
+        n_training_episodes=2,
         n_steps_episode=20,
         save_output=False,
     )
@@ -39,7 +39,7 @@ def _make_config() -> Config:
 def test_total_steps() -> None:
     """The total number of training steps is episodes * steps per episode."""
 
-    config = Config(n_episodes=3, n_steps_episode=10)
+    config = Config(n_training_episodes=3, n_steps_episode=10)
     assert config.total_steps == 30
 
 

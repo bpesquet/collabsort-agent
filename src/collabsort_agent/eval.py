@@ -9,13 +9,13 @@ from collabsort_agent.agent import Agent
 from collabsort_agent.metrics import EpisodeMetrics
 
 
-def run_eval_episode(
+def eval_episode(
     agent: Agent,
     env,
     n_steps_episode: int,
-    seed: int | None = None,
+    seed: int | None,
 ) -> EpisodeMetrics:
-    """Run a single greedy evaluation episode (no exploration, no learning update)."""
+    """Run a single evaluation episode (no exploration, no learning update)"""
 
     obs, _ = env.reset(seed=seed)
     ep_metrics = EpisodeMetrics()
@@ -41,7 +41,7 @@ def run_eval_episode(
     return ep_metrics
 
 
-def run_eval_episodes(
+def eval(
     agent: Agent,
     env,
     n_steps_episode: int,
@@ -49,16 +49,18 @@ def run_eval_episodes(
     seed: int,
 ) -> list[EpisodeMetrics]:
     """
-    Run several greedy evaluation episodes and return their metrics.
+    Run several evaluation episodes and return their metrics, so that
+    they reflect actual policy performance rather than exploration-noisy training rewards.
 
     Only the first episode's reset is seeded, so the env's own RNG stream
-    still varies episode conditions (object layouts) across the batch; using
-    a fixed seed makes the whole batch reproducible across runs, for
-    objective comparison between agents.
+    still varies episode conditions (object layouts) across the batch.
+    Two runs starting from the same seed draw from that RNG in exactly the same sequence
+    and get exactly the same N episodes, just not N identical episodes:
+    using a fixed seed at first makes the whole batch reproducible across runs.
     """
 
     return [
-        run_eval_episode(
+        eval_episode(
             agent=agent,
             env=env,
             n_steps_episode=n_steps_episode,

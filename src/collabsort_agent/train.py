@@ -15,7 +15,7 @@ from tqdm import trange
 
 from collabsort_agent.agent_factory import create_agent
 from collabsort_agent.config import Config
-from collabsort_agent.eval import run_eval_episodes
+from collabsort_agent.eval import eval
 from collabsort_agent.metrics import EpisodeMetrics, safe_ratio
 
 # File used to persist the training step count across saved runs
@@ -42,11 +42,10 @@ def log_hyperparameters(
             (
                 "| Hyperparameter | Value |",
                 "| --- | --- |",
-                f"| decision_algorithm | {config.agent.decision.algorithm} |",
-                f"| learning_algorithm | {config.agent.learning.algorithm} |",
-                f"| n_steps_episode | {config.n_steps_episode} |",
-                f"| n_episodes | {config.n_episodes} |",
-                f"| eval_n_episodes | {config.eval_n_episodes} |",
+                f"| decision | {config.agent.decision.algorithm} |",
+                f"| learning | {config.agent.learning.algorithm} |",
+                f"| n_training_steps | {config.total_steps} |",
+                f"| n_eval_steps | {config.n_eval_episodes * config.n_steps_episode} |",
             )
         ),
         global_step=0,
@@ -55,12 +54,10 @@ def log_hyperparameters(
     # Log hyperparameters (kept in the same run directory via run_name=".")
     logger.add_hparams(
         hparam_dict={
-            "decision_algorithm": config.agent.decision.algorithm,
-            "learning_algorithm": config.agent.learning.algorithm,
-            "n_steps_episode": config.n_steps_episode,
-            "n_episodes": config.n_episodes,
-            "eval_n_episodes": config.eval_n_episodes,
+            "decision": config.agent.decision.algorithm,
+            "learning": config.agent.learning.algorithm,
         },
+        # Metrics are only computed during evaluation
         metric_dict={
             "hparam/reward": mean(
                 m.agent.reward + m.robot.reward for m in eval_metrics
@@ -92,21 +89,14 @@ def train(config: Config) -> None:
     time_str = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
     train_dir = f"runs/train_{time_str}_{config.agent.decision.algorithm}_{config.agent.learning.algorithm}"
 
-    # Create environment
-    env = gym.make(id=config.env_id, config=config.env)
-
-    # Separate environment instance for the end-of-training evaluation phase,
-    # so it doesn't disturb the training environment's episode state or RNG
-    # stream
-    eval_env = (
-        gym.make(id=config.env_id, config=config.env) if config.save_output else None
-    )
+    # Create training environment
+    training_env = gym.make(id=config.env_id, config=config.env)
 
     # Create agent
     agent = create_agent(
         config=config,
-        sample_obs=env.observation_space.sample(),
-        rng=env.np_random,
+        sample_obs=training_env.observation_space.sample(),
+        rng=training_env.np_random,
     )
 
     # Number of time steps since beginning of training
@@ -126,11 +116,15 @@ def train(config: Config) -> None:
     # Create logger
     logger = SummaryWriter(f"{train_dir}", flush_secs=60)
 
+    # Separate environment for the end-of-training evaluation phase, created
+    # only when that phase actually runs (i.e. save_output is enabled)
+    eval_env = None
+
     try:
         # Global loop
-        for episode in trange(config.n_episodes, desc="Training progress"):
+        for episode in trange(config.n_training_episodes, desc="Training progress"):
             # Reset environment and metrics for new episode
-            obs, _ = env.reset()
+            obs, _ = training_env.reset()
             ep_metrics = EpisodeMetrics()
             ep_over: bool = False
 
@@ -143,7 +137,9 @@ def train(config: Config) -> None:
                 )
 
                 # Take action and observe result
-                next_obs, reward, terminated, truncated, info = env.step(action=action)
+                next_obs, reward, terminated, truncated, info = training_env.step(
+                    action=action
+                )
                 reward: float = float(reward)
 
                 # Update episode metrics
@@ -190,15 +186,15 @@ def train(config: Config) -> None:
             # Serialize training step count
             (Path(train_dir) / TRAINING_STEP_FILENAME).write_text(str(training_step))
 
-            # Evaluation phase: run the trained agent greedily against a
-            # fixed, deterministic environment, so the hparam summary
-            # metrics reflect actual policy performance rather than
-            # exploration-noisy training rewards
-            eval_metrics = run_eval_episodes(
+            # Create separate environment for end-of-training evaluation phase
+            eval_env = gym.make(id=config.env_id, config=config.env)
+
+            # Evaluation phase
+            eval_metrics = eval(
                 agent=agent,
                 env=eval_env,
                 n_steps_episode=config.n_steps_episode,
-                n_episodes=config.eval_n_episodes,
+                n_episodes=config.n_eval_episodes,
                 seed=config.eval_seed,
             )
 
@@ -206,7 +202,7 @@ def train(config: Config) -> None:
 
     finally:
         # Always release the environments and flush/close the logger
-        env.close()
+        training_env.close()
         if eval_env is not None:
             eval_env.close()
         logger.close()

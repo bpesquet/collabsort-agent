@@ -66,7 +66,7 @@ class Qlearning(ActionValueEstimator):
         super().log_episode(logger=logger, episode=episode)
 
         logger.add_scalar(
-            tag="learning/learning_rate",
+            tag="agent/learning_rate",
             scalar_value=self.hyperparameters.alpha,
             global_step=episode,
         )
