@@ -3,15 +3,11 @@ Double Dueling DQN algorithm
 """
 
 from collabsort_agent.learning.double_dqn import DoubleDQN
-from collabsort_agent.learning.dueling_dqn import Dueling_Network
+from collabsort_agent.learning.dueling_dqn import DuelingDQN
 
 
-class DoubleDuelingDQN(DoubleDQN):
+class DoubleDuelingDQN(DoubleDQN, DuelingDQN):
     """
     Double Dueling DQN algorithm implementation.
-    Inherits the DoubleDQN calculation rule and overrides the network with Dueling_Network.
+    Combines the DoubleDQN calculation rule with the DuelingDQN network architecture.
     """
-
-    def build_network(self):
-        """Inject the Dueling architecture."""
-        return Dueling_Network(state_size=self.state_size, action_size=self.n_actions)

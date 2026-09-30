@@ -25,11 +25,6 @@ class ExplorationDecay(ABC):
 
         return max(epsilon_decayed, self.config.epsilon_min)
 
-    def reset(self, total_steps: int) -> None:
-        """Restart the decay from the beginning for a new training phase."""
-        self.decay_steps = max(1, int(total_steps * self.config.decay_span))
-        self._reset_state()
-
     @abstractmethod
     def _reset_state(self) -> None:
         """Recompute any cached state required by the decay schedule."""
