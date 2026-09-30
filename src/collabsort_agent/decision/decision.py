@@ -20,6 +20,8 @@ class DecisionConfig:
     algorithm: Literal["eps", "ard"] = "eps"
 
     # ---------- Exploration decay ----------
+    # Used by both algorithms: epsilon-greedy decays its exploration probability,
+    # ARD increases its advantage weight w_d from 0 (random choices) to its final value.
 
     # Starting exploration probability
     epsilon_start: float = 1
@@ -33,10 +35,12 @@ class DecisionConfig:
     # Percentage of training time during which exploration probability is decayed
     decay_span: float = 0.5
 
-    # If enabled, reset the exploration decay at the start of each curriculum phase.
-    reset_exploration_per_phase: bool = False
-
     # ---------- Advantage Racing Diffusion ----------
+
+    # Method for running the accumulator race:
+    # - "wald": exact sampling of first-passage times (fast, no evidence history).
+    # - "euler": step-by-step Euler-Maruyama simulation (slower, records evidence history for plotting).
+    accumulation: Literal["wald", "euler"] = "wald"
 
     # Rule for ending evidence accumulation and choosing an action
     decision_rule: Literal["win-all"] = "win-all"
@@ -50,14 +54,30 @@ class DecisionConfig:
     # Maximum decision threshold
     theta_max: float = 3.0
 
-    # Weight of the advantage (Q_i - Q_j) term
-    w_d: float = 1.0
+    # Weight of the advantage (Q_i - Q_j) term, reached at the end of exploration decay
+    w_d: float = 2.0
 
-    # Weight of the sum (Q_i + Q_j) term
-    w_s: float = 0.1
+    # Exponent k of the advantage weight schedule: w_d(t) = w_d * progress(t)^k,
+    # where progress(t) in [0, 1] follows the exploration decay.
+    # Choice greediness rises quickly with w_d, so k > 1 keeps exploration going longer
+    # (k = 3 roughly matches the greediness of epsilon-greedy along its schedule).
+    w_d_schedule_power: float = 3.0
 
-    # Urgency / baseline drift added to every accumulator
-    V_0: float = 0.1
+    # Weight of the sum (Q_i + Q_j) term.
+    # Disabled by default (limited RL-lARD variant of Miletic2021): the sum term assumes
+    # positive, bounded Q-values, whereas this environment yields mostly negative ones.
+    w_s: float = 0.0
+
+    # Urgency / baseline drift added to every accumulator.
+    # Must be large enough (relative to normalized advantages) for decisions to terminate.
+    V_0: float = 1.5
+
+    # If enabled, divide Q-values by a running estimate of their spread across actions
+    # before computing drift rates, so that drifts do not depend on the learned Q-value scale
+    normalize_q_values: bool = True
+
+    # Decay factor of the exponential moving average used to estimate the Q-value spread
+    q_scale_decay: float = 0.99
 
     # Mean of accumulation noise
     noise_mean: float = 0.0
@@ -65,7 +85,7 @@ class DecisionConfig:
     # Standard deviation of accumulation noise (denoted s in Miletic2021 paper)
     noise_std: float = 0.03
 
-    # Safety cap on the inner accumulation loop
+    # Maximal decision time, in accumulation steps of duration dt
     max_steps: int = 100
 
     # Euler-Maruyama timestep
@@ -101,10 +121,6 @@ class Deliberator(ABC):
         deterministic, when True, disables exploration and always returns
         the greedy action. Used for evaluation.
         """
-
-    def reset_for_phase(self, phase_steps: int) -> None:
-        """Reset any phase-dependent exploration state at the start of a new phase."""
-        return
 
     def update_calibration(self, td_error: float) -> None:
         """

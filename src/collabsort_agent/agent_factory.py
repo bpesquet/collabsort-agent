@@ -134,20 +134,22 @@ def _build_deliberator(
     meta_ctrl: MetaController,
 ):
     """Factory helper to build the deliberator dynamically."""
-    if algo_name == "eps":
-        if config.agent.decision.exploration_decay == "lin":
-            decay = LinearExplorationDecay(
-                config=config.agent.decision, total_steps=config.total_steps
-            )
-        elif config.agent.decision.exploration_decay == "exp":
-            decay = ExponentialExplorationDecay(
-                config=config.agent.decision, total_steps=config.total_steps
-            )
-        else:
-            raise ValueError(
-                f"Unrecognized exploration decay: {config.agent.decision.exploration_decay}"
-            )
 
+    # Exploration schedule, shared by all decision algorithms
+    if config.agent.decision.exploration_decay == "lin":
+        decay = LinearExplorationDecay(
+            config=config.agent.decision, total_steps=config.total_steps
+        )
+    elif config.agent.decision.exploration_decay == "exp":
+        decay = ExponentialExplorationDecay(
+            config=config.agent.decision, total_steps=config.total_steps
+        )
+    else:
+        raise ValueError(
+            f"Unrecognized exploration decay: {config.agent.decision.exploration_decay}"
+        )
+
+    if algo_name == "eps":
         return EpsilonGreedy(
             config=config.agent.decision,
             estimator=estimator,
@@ -198,6 +200,7 @@ def _build_deliberator(
             meta_monitoring=meta_monitoring,
             meta_ctrl=meta_ctrl,
             rng=rng,
+            exploration_decay=decay,
         )
 
     raise ValueError(f"Unrecognized decision algorithm: {algo_name}")

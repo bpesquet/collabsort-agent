@@ -102,7 +102,7 @@ class MetaMonitoring:
 
         if self.confidences:
             logger.add_scalar(
-                tag="metacognition/mean_confidence",
+                tag="agent/confidence_mean",
                 scalar_value=mean(self.confidences),
                 global_step=episode,
             )
@@ -112,7 +112,7 @@ class MetaMonitoring:
 
         if self.calibration_biases:
             logger.add_scalar(
-                tag="metacognition/calibration_bias",
+                tag="agent/confidence_calibration_bias",
                 scalar_value=mean(self.calibration_biases),
                 global_step=episode,
             )
