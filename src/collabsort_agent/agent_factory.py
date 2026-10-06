@@ -26,6 +26,7 @@ from collabsort_agent.metacognition import Hyperparameters
 from collabsort_agent.metacognition.confidence import (
     BayesianConfidence,
     GapConfidence,
+    QValueGapConfidence,
     TDErrorCalibration,
 )
 from collabsort_agent.metacognition.controller import MetaController
@@ -171,6 +172,12 @@ def _build_deliberator(
         elif config.agent.meta.confidence_method == "bayesian":
             confidence_method = BayesianConfidence(
                 decision_cfg=config.agent.decision, hyperparameters=hyperparameters
+            )
+        elif config.agent.meta.confidence_method == "qgap":
+            confidence_method = QValueGapConfidence(
+                decision_cfg=config.agent.decision,
+                hyperparameters=hyperparameters,
+                scale=config.agent.meta.qgap_confidence_scale,
             )
         else:
             raise ValueError(

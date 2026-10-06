@@ -39,6 +39,11 @@ class Accumulators:
         # specific accumulator (needed for the Bayesian confidence estimate).
         self.drift_rates = self.empty_evidence()
 
+        # Action values used to compute the drift rates of the current/last decision
+        # (normalized if Q-value normalization is enabled). Shape: (n_actions,)
+        # Stored for confidence methods based on action values.
+        self.action_values = np.zeros((n_actions,), dtype=float)
+
     @property
     def n_accumulators(self) -> int:
         """Return the number of accumulators = n_actions(n_actions - 1)"""

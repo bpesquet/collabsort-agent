@@ -5,6 +5,8 @@ Confidence omputation algorithms.
 import math
 from abc import ABC, abstractmethod
 
+import numpy as np
+
 from collabsort_agent.decision.accumulators import Accumulators
 from collabsort_agent.decision.decision import DecisionConfig
 from collabsort_agent.metacognition import Hyperparameters, MetaConfig
@@ -43,7 +45,9 @@ class GapConfidence(ConfidenceMethod):
         min_evidence = accumulators.min_evidence(
             actions=[chosen_action, runnerup_action]
         )
-        return (min_evidence[0] - min_evidence[1]) / (self.hyperparameters.theta + 1e-6)
+        return float(
+            (min_evidence[0] - min_evidence[1]) / (self.hyperparameters.theta + 1e-6)
+        )
 
 
 class BayesianConfidence(ConfidenceMethod):
@@ -87,13 +91,55 @@ class BayesianConfidence(ConfidenceMethod):
         std_diff = self.decision_cfg.noise_std * math.sqrt(2.0 * reaction_time)
 
         z = (v_diff * elapsed_time) / (std_diff + 1e-12)
-        return self._normal_cdf(z)
+        return _normal_cdf(z)
 
-    @staticmethod
-    def _normal_cdf(z: float) -> float:
-        """Standard normal CDF, computed via the error function (no scipy dependency)."""
 
-        return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
+class QValueGapConfidence(ConfidenceMethod):
+    """
+    Value-based confidence: how much better the chosen action looks than the best alternative,
+    according to the action values that drove the decision.
+
+    Unlike the other methods, it does not depend on the accumulation process
+    (threshold, reaction time, noise), only on the action values.
+    """
+
+    def __init__(
+        self,
+        decision_cfg: DecisionConfig,
+        hyperparameters: Hyperparameters,
+        scale: float = 1.0,
+    ) -> None:
+        super().__init__(decision_cfg=decision_cfg, hyperparameters=hyperparameters)
+
+        # Multiplier of the Q-value gap before mapping it to [0, 1]
+        self.scale = scale
+
+    def compute_decision_confidence(
+        self,
+        chosen_action: int,
+        runnerup_action: int,
+        reaction_time: float,
+        accumulators: Accumulators,
+    ) -> float:
+        """
+        Compute decision confidence as c = Phi(scale * (Q_chosen - max_{a != chosen} Q_a)).
+
+        With Q-value normalization, the gap is expressed in units of the Q-value spread across actions.
+        Confidence is 0.5 for a tie, tends to 1 when the chosen action clearly has the best value,
+        and is below 0.5 when a better-valued action was not chosen (exploration).
+        """
+
+        action_values = accumulators.action_values
+        best_alternative = np.max(np.delete(action_values, chosen_action))
+        gap = float(action_values[chosen_action] - best_alternative)
+
+        return _normal_cdf(self.scale * gap)
+
+
+def _normal_cdf(z: float) -> float:
+    """Standard normal CDF, computed via the error function (no scipy dependency)."""
+
+    return 0.5 * (1.0 + math.erf(z / math.sqrt(2.0)))
 
 
 class CalibrationMethod(ABC):

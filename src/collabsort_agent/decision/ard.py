@@ -81,6 +81,7 @@ class ARD(Deliberator):
         # Compute drift rates for all accumulators
         if self.config.normalize_q_values:
             action_values = self._normalize_q_values(action_values)
+        self.accumulators.action_values = action_values
         drift_rates = self._compute_drift_rates(action_values)
         self.accumulators.drift_rates = drift_rates
 

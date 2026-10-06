@@ -16,7 +16,11 @@ class MetaConfig:
     # Method used to compute decision confidence:
     # - "gap": normalized distance between winner/runner-up slowest accumulators.
     # - "bayesian": posterior probability that the winning action's drift truly exceeds the runner-up's.
-    confidence_method: Literal["gap", "bayesian"] = "bayesian"
+    # - "qgap": normal CDF of the (normalized) Q-value gap between the chosen action and the best alternative.
+    confidence_method: Literal["gap", "bayesian", "qgap"] = "bayesian"
+
+    # Multiplier of the Q-value gap before mapping it to [0, 1] ("qgap" confidence method only)
+    qgap_confidence_scale: float = 1.0
 
     # Desired confidence level [0..1].
     # The meaningful range/scale of this parameter depends on confidence_method:
@@ -24,6 +28,8 @@ class MetaConfig:
     #   so 0.5 = chance level and e.g. 0.75 is a reasonable target.
     # - "gap": confidence is an uncalibrated geometric measure whose scale
     #   depends on noise_std/theta; a lower target (e.g. 0.4) is appropriate.
+    # - "qgap": 0.5 = tie between the chosen action and the best alternative.
+    #   It does not depend on theta, so the controller has no direct influence on it.
     confidence_target: float = 0.75
 
     # Exponential moving average decay for smoothing confidence

@@ -3,6 +3,7 @@ Unit tests for training.
 """
 
 import gymnasium as gym
+import pytest
 from gym_collabsort.config import Config as EnvConfig
 
 from collabsort_agent.agent import AgentConfig
@@ -48,6 +49,18 @@ def test_train(tmp_path, monkeypatch) -> None:
 
     monkeypatch.chdir(tmp_path)
     config = _make_config()
+
+    train(config=config)
+
+
+@pytest.mark.parametrize("confidence_method", ["gap", "bayesian", "qgap"])
+def test_train_ard(tmp_path, monkeypatch, confidence_method) -> None:
+    """A short training run completes with ARD decisions and each confidence method."""
+
+    monkeypatch.chdir(tmp_path)
+    config = _make_config()
+    config.agent.decision.algorithm = "ard"
+    config.agent.meta.confidence_method = confidence_method
 
     train(config=config)
 

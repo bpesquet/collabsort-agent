@@ -14,6 +14,7 @@ from collabsort_agent.metacognition import Hyperparameters, MetaConfig
 from collabsort_agent.metacognition.confidence import (
     BayesianConfidence,
     GapConfidence,
+    QValueGapConfidence,
     TDErrorCalibration,
 )
 from collabsort_agent.metacognition.controller import MetaController
@@ -92,6 +93,30 @@ class TestGapConfidence:
         )
 
         assert abs(confidence - 0.15) < 1e-4
+
+    def test_confidence_gap_is_python_float(self) -> None:
+        """
+        Evidence inherits float32 from network Q-values: confidence must still be a Python float,
+        since statistics.mean() fails on mixed float32/float values when logging.
+        """
+
+        decision_cfg = DecisionConfig(theta_start=1.0)
+        hyperparameters = Hyperparameters(
+            decision_cfg=decision_cfg, learning_cfg=LearningConfig()
+        )
+        gap = GapConfidence(decision_cfg=decision_cfg, hyperparameters=hyperparameters)
+
+        accumulators = _make_accumulators(drift_rates=[0.0, 0.0])
+        accumulators.evidence = np.array([0.7, 1.0], dtype=np.float32)
+
+        confidence = gap.compute_decision_confidence(
+            chosen_action=1,
+            runnerup_action=0,
+            reaction_time=10.0,
+            accumulators=accumulators,
+        )
+
+        assert type(confidence) is float
 
 
 class TestBayesianConfidence:
@@ -176,6 +201,64 @@ class TestBayesianConfidence:
         )
 
         assert abs(confidence - 0.5) < 1e-6
+
+
+class TestQValueGapConfidence:
+    @staticmethod
+    def _confidence(
+        action_values: list[float],
+        chosen_action: int,
+        scale: float = 1.0,
+        theta: float = 1.0,
+        reaction_time: float = 30.0,
+    ) -> float:
+        decision_cfg = DecisionConfig(theta_start=theta)
+        hyperparameters = Hyperparameters(
+            decision_cfg=decision_cfg, learning_cfg=LearningConfig()
+        )
+        qgap = QValueGapConfidence(
+            decision_cfg=decision_cfg, hyperparameters=hyperparameters, scale=scale
+        )
+        accumulators = Accumulators(n_actions=len(action_values))
+        accumulators.action_values = np.array(action_values)
+
+        return qgap.compute_decision_confidence(
+            chosen_action=chosen_action,
+            # Runner-up from the race is not used: the gap is with the best alternative
+            runnerup_action=(chosen_action + 1) % len(action_values),
+            reaction_time=reaction_time,
+            accumulators=accumulators,
+        )
+
+    def test_confidence_qgap_is_normal_cdf_of_gap(self) -> None:
+        # Gap with best alternative = 1.0 - 0.5 = 0.5, Phi(0.5) = 0.6915
+        confidence = self._confidence(action_values=[0.0, 1.0, 0.5], chosen_action=1)
+        assert abs(confidence - 0.6915) < 1e-4
+
+        # Scale multiplies the gap: Phi(2 * 0.5) = Phi(1) = 0.8413
+        confidence = self._confidence(
+            action_values=[0.0, 1.0, 0.5], chosen_action=1, scale=2.0
+        )
+        assert abs(confidence - 0.8413) < 1e-4
+
+    def test_confidence_qgap_ties_and_non_greedy_choices(self) -> None:
+        # Tie between chosen action and best alternative: chance level
+        assert abs(self._confidence([0.3, 0.3, -1.0], chosen_action=0) - 0.5) < 1e-6
+
+        # Chosen action is not the best-valued one (exploration): below chance level
+        assert self._confidence([0.0, 1.0, 0.5], chosen_action=2) < 0.5
+
+    def test_confidence_qgap_is_independent_of_accumulation(self) -> None:
+        reference = self._confidence([0.0, 1.0, 0.5], chosen_action=1)
+
+        for theta, reaction_time in [(0.2, 5.0), (3.0, 100.0)]:
+            confidence = self._confidence(
+                [0.0, 1.0, 0.5],
+                chosen_action=1,
+                theta=theta,
+                reaction_time=reaction_time,
+            )
+            assert abs(confidence - reference) < 1e-9
 
 
 class TestMetaMonitoring:

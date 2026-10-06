@@ -288,6 +288,18 @@ class TestARD:
             # Chosen action must be one of the winners, not an index into the winners list
             assert ard.choose_action(state=state, training_step=0) in (2, 3)
 
+    def test_action_values_stored_for_confidence(self) -> None:
+        state = np.zeros(5, dtype=np.float32)
+        q_values = np.array([-20.0, -18.0, -19.0])
+
+        ard, _ = self._make_ard(action_values=q_values, config=DecisionConfig())
+        ard.choose_action(state=state, training_step=0)
+
+        # Normalized action values: centered, same ordering as raw Q-values
+        stored = ard.accumulators.action_values
+        assert abs(stored.mean()) < 1e-9
+        assert np.array_equal(np.argsort(stored), np.argsort(q_values))
+
     def test_drift_rates(self) -> None:
         state = np.zeros(5, dtype=np.float32)
         q_values = np.array([0.5, 1.0, 0.2])
