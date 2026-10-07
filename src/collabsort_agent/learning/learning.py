@@ -74,11 +74,17 @@ class ActionValueEstimator(ABC):
         self.config = config
         self.n_actions = n_actions
 
-        # Recorded loss values (used for logging)
+        # Recorded loss values (used for logging).
+        # Algorithm-specific (e.g. |TD-error| for Q-Learning, batch MSE for DQN):
+        # only comparable within an algorithm family.
         self.losses: list[float] = []
 
-        # Average Q-values (used for logging)
-        self.mean_q_values: list[float] = []
+        # Per-transition metrics computed identically for all estimators
+        # on the transitions actually experienced (used for logging).
+        # See record_transition_metrics().
+        self.abs_td_errors: list[float] = []
+        self.q_taken_values: list[float] = []
+        self.q_max_values: list[float] = []
 
         # Signed TD-error (reward-prediction error, Eq 1) from the most
         # recent update_action_values() call. Used by outcome-based
@@ -102,21 +108,53 @@ class ActionValueEstimator(ABC):
     ):
         """Update action values after an action was taken"""
 
-    def log_episode(self, logger: SummaryWriter, episode: int) -> None:
-        logger.add_scalar(
-            tag="agent/mean_td_error",
-            scalar_value=mean(self.losses),
-            global_step=episode,
-        )
-        logger.add_scalar(
-            tag="agent/mean_q_value",
-            scalar_value=mean(self.mean_q_values),
-            global_step=episode,
+    def record_transition_metrics(
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool = False,
+    ) -> None:
+        """
+        Record estimator-agnostic metrics for an experienced transition.
+
+        Must be called before update_action_values(), so that metrics reflect
+        the estimates the agent actually acted upon. Uses the one-step greedy
+        TD-error δ = r + γ · max_a' Q(s', a') − Q(s, a) computed with
+        get_action_values() for every estimator, regardless of the target
+        each algorithm actually learns from (target network, n-step returns...).
+        This makes the values comparable across learning algorithms.
+        """
+
+        q_values = self.get_action_values(state)
+        q_current = float(q_values[action])
+        q_target = (
+            reward
+            if done
+            else reward
+            + self.config.gamma * float(self.get_action_values(next_state).max())
         )
 
-        # Reset episode data
-        self.losses.clear()
-        self.mean_q_values.clear()
+        self.abs_td_errors.append(abs(q_target - q_current))
+        self.q_taken_values.append(q_current)
+        self.q_max_values.append(float(q_values.max()))
+
+    def log_episode(self, logger: SummaryWriter, episode: int) -> None:
+        # Lists may be empty, e.g. before a replay buffer holds a full batch
+        for tag, values in (
+            ("learning/loss", self.losses),
+            ("learning/abs_td_error", self.abs_td_errors),
+            ("learning/q_taken", self.q_taken_values),
+            ("learning/q_max", self.q_max_values),
+        ):
+            if values:
+                logger.add_scalar(
+                    tag=tag, scalar_value=mean(values), global_step=episode
+                )
+
+            # Reset episode data
+            values.clear()
 
     @abstractmethod
     def save_state(self, dir: str) -> None:

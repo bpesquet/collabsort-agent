@@ -264,7 +264,6 @@ class DQN(ActionValueEstimator):
 
         # Compute action values for the current states
         q_values = self.q_network(states).gather(1, actions).squeeze(1)
-        self.mean_q_values.append(torch.mean(q_values).item())
 
         # Using target_network (not q_network) to compute Q-targets.
         # Using q_network here would defeat the purpose of the target network: the

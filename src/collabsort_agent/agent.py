@@ -88,8 +88,19 @@ class Agent:
             sensory_state=next_sensory_state
         )
 
+        estimator = self.deliberator.estimator
+
+        # Record learning metrics before the update modifies estimates
+        estimator.record_transition_metrics(
+            state=self.current_extended_state,
+            action=self.current_action.value,
+            reward=reward,
+            next_state=next_extended_state,
+            done=done,
+        )
+
         # Update action values
-        self.deliberator.estimator.update_action_values(
+        estimator.update_action_values(
             state=self.current_extended_state,
             action=self.current_action.value,
             reward=reward,

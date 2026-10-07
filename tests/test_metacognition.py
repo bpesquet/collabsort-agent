@@ -352,7 +352,7 @@ class TestMetaMonitoring:
 
         assert len(logger.scalars) == 1
         tag, mean_confidence, episode = logger.scalars[0]
-        assert tag == "agent/confidence_mean"
+        assert tag == "decision/confidence_mean"
         assert abs(mean_confidence - expected_mean_confidence) < 1e-9
         assert episode == 3
         # Episode data should be reset after logging
@@ -587,12 +587,12 @@ class TestMetaMonitoringCalibration:
         meta_monitoring.log_episode(logger=logger.as_summary_writer(), episode=5)
 
         tags = {tag for tag, _, _ in logger.scalars}
-        assert "agent/confidence_calibration_bias" in tags
+        assert "decision/confidence_calibration_bias" in tags
 
         bias_entry = next(
             entry
             for entry in logger.scalars
-            if entry[0] == "agent/confidence_calibration_bias"
+            if entry[0] == "decision/confidence_calibration_bias"
         )
         assert abs(bias_entry[1] - expected_mean_bias) < 1e-9
         assert bias_entry[2] == 5

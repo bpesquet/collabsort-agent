@@ -403,12 +403,12 @@ class ARD(Deliberator):
         """Log information after an episode"""
 
         logger.add_scalar(
-            tag="agent/decision_threshold",
+            tag="decision/decision_threshold",
             scalar_value=self.hyperparameters.theta,
             global_step=episode,
         )
         logger.add_scalar(
-            tag="agent/advantage_weight",
+            tag="decision/advantage_weight",
             scalar_value=self.w_d,
             global_step=episode,
         )

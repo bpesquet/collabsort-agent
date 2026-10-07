@@ -84,7 +84,6 @@ class TestPER(TestDQN):
             state_size=state_size,
         )
         agent.losses = []
-        agent.mean_q_values = []
         return agent
 
     def test_per_store_transition(self) -> None:

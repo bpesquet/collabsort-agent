@@ -82,7 +82,6 @@ class NStepLearning(DQN):
         actions = torch.clamp(actions, 0, self.n_actions - 1)
 
         q_values = self.q_network(states).gather(1, actions).squeeze(1)
-        self.mean_q_values.append(torch.mean(q_values).item())
 
         with torch.no_grad():
             q_next = self._get_next_q_values(next_states)

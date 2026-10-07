@@ -31,7 +31,6 @@ class TestNStepLearning(TestDQN):  # Inherit from TestDQN to test DQN compliance
             n_step=n_step,
         )
         agent.losses = []
-        agent.mean_q_values = []
         return agent
 
     # -------------------------------------------------------------------------

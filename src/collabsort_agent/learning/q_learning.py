@@ -42,10 +42,7 @@ class Qlearning(ActionValueEstimator):
     ):
         """Update action values after an action was taken"""
 
-        q_values = self.get_action_values(state)
-        self.mean_q_values.append(np.mean(q_values))
-
-        q_current = float(q_values[action])
+        q_current = float(self.get_action_values(state)[action])
         q_next_max = float(self.get_action_values(next_state).max())
 
         # δ = r + γ · max_a' Q(s', a') − Q(s, a)
@@ -66,7 +63,7 @@ class Qlearning(ActionValueEstimator):
         super().log_episode(logger=logger, episode=episode)
 
         logger.add_scalar(
-            tag="agent/learning_rate",
+            tag="learning/learning_rate",
             scalar_value=self.hyperparameters.alpha,
             global_step=episode,
         )

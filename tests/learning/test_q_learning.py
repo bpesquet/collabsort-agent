@@ -65,6 +65,33 @@ class TestQLearning:
         # With q_start=0, alpha=0.1: Q(s,a) = 0 + 0.1*(1 - 0) = 0.1
         assert abs(ql.get_action_values(state)[0] - 0.1) < 1e-6
 
+    def test_record_transition_metrics(self) -> None:
+        """Estimator-agnostic metrics use the one-step greedy TD-error."""
+
+        config = LearningConfig(gamma=0.5, q_start=0.0)
+        state = np.array([1.0], dtype=np.float32)
+        next_state = np.array([2.0], dtype=np.float32)
+
+        ql = Qlearning(
+            config=config, n_actions=2, hyperparameters=self._make_hyperparameters()
+        )
+        ql._table[ql._make_key(state)][:] = [1.0, 3.0]
+        ql._table[ql._make_key(next_state)][:] = [4.0, 2.0]
+
+        ql.record_transition_metrics(
+            state=state, action=0, reward=1.0, next_state=next_state
+        )
+        # δ = 1 + 0.5 * 4 - 1 = 2
+        assert ql.abs_td_errors == [2.0]
+        assert ql.q_taken_values == [1.0]
+        assert ql.q_max_values == [3.0]
+
+        # No bootstrapping on terminal transitions: δ = 1 - 1 = 0
+        ql.record_transition_metrics(
+            state=state, action=0, reward=1.0, next_state=next_state, done=True
+        )
+        assert ql.abs_td_errors[-1] == 0.0
+
     def _make_qlearning(self, n_actions: int = 4, q_start: float = 0.0) -> Qlearning:
         return Qlearning(
             config=LearningConfig(q_start=q_start),
