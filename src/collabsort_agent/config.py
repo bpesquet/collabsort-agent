@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pickle
 from dataclasses import dataclass, field
+from typing import Literal
 
 from gym_collabsort.config import Config as EnvConfig
 
@@ -36,6 +37,18 @@ class Config:
 
     # Maximal number of steps in an episode
     n_steps_episode: int = 1000
+
+    # Seed for the training run (environment, agent and global RNGs).
+    # If None, a random seed is drawn at the start of training
+    training_seed: int | None = None
+
+    # Action selection during the evaluation phase:
+    # - "greedy": always choose the action with the highest value. Only the
+    #   learned action values are evaluated, not the decision algorithm.
+    # - "policy": use the decision algorithm as-is (e.g. ARD race, epsilon-greedy
+    #   with the final exploration probability), without learning updates.
+    #   Evaluates the whole agent architecture.
+    eval_mode: Literal["greedy", "policy"] = "policy"
 
     # Seed used to reset the evaluation environment before its first episode,
     # kept fixed so evaluation always runs against the same deterministic

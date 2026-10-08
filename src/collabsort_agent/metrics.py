@@ -116,24 +116,24 @@ class EpisodeMetrics:
         self.agent.log(logger=logger, episode=episode)
         self.robot.log(logger=logger, episode=episode)
 
-        # Log collaboration metrics
+        # Log team (agent + robot) metrics
         logger.add_scalar(
-            tag="collab/n_missed_objects",
+            tag="team/n_missed_objects",
             scalar_value=self.n_missed_objects,
             global_step=episode,
         )
         logger.add_scalar(
-            tag="collab/n_collisions",
+            tag="team/n_collisions",
             scalar_value=self.n_collisions,
             global_step=episode,
         )
         logger.add_scalar(
-            tag="collab/reward",
+            tag="team/reward",
             scalar_value=self.agent.reward + self.robot.reward,
             global_step=episode,
         )
         logger.add_scalar(
-            tag="collab/collected_objects_ratio",
+            tag="team/collected_objects_ratio",
             scalar_value=safe_ratio(
                 self.agent.n_collected_objects + self.robot.n_collected_objects,
                 self.n_objects,

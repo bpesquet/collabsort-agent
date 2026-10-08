@@ -2,12 +2,15 @@
 Train an agent.
 """
 
+import random
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean
 
 import gymnasium as gym
+import numpy as np
+import torch
 import tyro
 from gym_collabsort.config import Action
 from torch.utils.tensorboard import SummaryWriter
@@ -23,17 +26,47 @@ from collabsort_agent.metrics import EpisodeMetrics, safe_ratio
 TRAINING_STEP_FILENAME = "training_step.txt"
 
 
+def get_decision_name(config: Config) -> str:
+    """
+    Return a name for the decision algorithm of the agent, including the
+    accumulation type for ARD (e.g. "ard-wald").
+    """
+
+    decision = config.agent.decision
+    if decision.algorithm != "ard":
+        return decision.algorithm
+
+    return f"{decision.algorithm}-{decision.accumulation}"
+
+
+def get_meta_name(config: Config) -> str:
+    """
+    Return a name for the metacognition setup of the agent, defined for all
+    decision algorithms so that it is comparable across architectures.
+    """
+
+    if config.agent.decision.algorithm != "ard":
+        return "none"
+
+    return config.agent.meta.confidence_method
+
+
 def log_hyperparameters(
     logger: SummaryWriter,
     config: Config,
+    train_metrics: list[EpisodeMetrics],
     eval_metrics: list[EpisodeMetrics],
 ) -> None:
     """
     Log main hyperparameters and summary metrics for a training run.
 
-    Summary metrics (reward, agent_reward, collected_objects_ratio) are
-    computed only from the end-of-training evaluation phase, not from
-    training episodes, since training rewards are contaminated by exploration.
+    Hyperparameters are limited to those defined for all agent architectures,
+    so that runs can be objectively compared.
+
+    Summary metrics are prefixed by their source:
+    - eval_*: computed from the end-of-training evaluation phase, since
+      training rewards are contaminated by exploration;
+    - train_*: computed over all training episodes, to measure sample efficiency.
     """
 
     # Log hyperparameters as a markdown table
@@ -43,8 +76,11 @@ def log_hyperparameters(
             (
                 "| Hyperparameter | Value |",
                 "| --- | --- |",
-                f"| decision | {config.agent.decision.algorithm} |",
+                f"| decision | {get_decision_name(config)} |",
                 f"| learning | {config.agent.learning.algorithm} |",
+                f"| meta | {get_meta_name(config)} |",
+                f"| train_seed | {config.training_seed} |",
+                f"| eval_mode | {config.eval_mode} |",
                 f"| n_training_steps | {config.total_steps} |",
                 f"| n_eval_steps | {config.n_eval_episodes * config.n_steps_episode} |",
             )
@@ -55,25 +91,38 @@ def log_hyperparameters(
     # Log hyperparameters (kept in the same run directory via run_name=".")
     logger.add_hparams(
         hparam_dict={
-            "decision": config.agent.decision.algorithm,
+            "decision": get_decision_name(config),
             "learning": config.agent.learning.algorithm,
+            "meta": get_meta_name(config),
+            "train_seed": config.training_seed,
+            "eval_mode": config.eval_mode,
         },
-        # Metrics are only computed during evaluation
         metric_dict={
-            "hparam/reward": mean(
+            "hparam/eval_team_reward_mean": mean(
                 m.agent.reward + m.robot.reward for m in eval_metrics
             ),
-            "hparam/agent_reward": mean(m.agent.reward for m in eval_metrics),
-            "hparam/collected_objects_ratio": mean(
+            "hparam/eval_team_collected_objects_ratio_mean": mean(
                 safe_ratio(
                     m.agent.n_collected_objects + m.robot.n_collected_objects,
                     m.n_objects,
                 )
                 for m in eval_metrics
             ),
+            "hparam/eval_n_collisions_mean": mean(m.n_collisions for m in eval_metrics),
+            "hparam/train_team_reward_mean": mean(
+                m.agent.reward + m.robot.reward for m in train_metrics
+            ),
         },
         run_name=".",
     )
+
+
+def seed_everything(seed: int) -> None:
+    """Seed global random number generators used by the agent"""
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
 
 
 def train_episode(
@@ -138,12 +187,20 @@ def train(config: Config) -> None:
         # Load configuration from previously saved run
         config.deserialize(dir=config.load_dir)
 
+    # Draw a seed if none was given, so that it is logged and the run is reproducible
+    if config.training_seed is None:
+        config.training_seed = int(np.random.SeedSequence().generate_state(1)[0])
+    seed_everything(config.training_seed)
+
     # Create directory path for training output
     time_str = datetime.now(tz=UTC).strftime("%Y%m%d%H%M%S")
     train_dir = f"runs/train_{time_str}_{config.agent.decision.algorithm}_{config.agent.learning.algorithm}"
 
     # Create training environment
     training_env = gym.make(id=config.env_id, config=config.env)
+    # Seed the environment RNG before the agent gets a reference to it.
+    # Later resets without a seed continue the same deterministic stream
+    training_env.reset(seed=config.training_seed)
 
     # Create agent
     agent = create_agent(
@@ -173,6 +230,9 @@ def train(config: Config) -> None:
     # only when that phase actually runs (i.e. save_output is enabled)
     eval_env = None
 
+    # Metrics of all training episodes, used for summary metrics
+    train_metrics: list[EpisodeMetrics] = []
+
     try:
         # Global loop
         for episode in trange(config.n_training_episodes, desc="Training progress"):
@@ -186,6 +246,7 @@ def train(config: Config) -> None:
             # Advance global step count and compute throughput
             training_step += ep_metrics.step
             ep_metrics.sps = training_step / (time.time() - start_time)
+            train_metrics.append(ep_metrics)
 
             if config.save_output:
                 # Log episode metrics
@@ -213,9 +274,10 @@ def train(config: Config) -> None:
                 n_steps_episode=config.n_steps_episode,
                 n_episodes=config.n_eval_episodes,
                 seed=config.eval_seed,
+                deterministic=config.eval_mode == "greedy",
             )
 
-            log_hyperparameters(logger, config, eval_metrics)
+            log_hyperparameters(logger, config, train_metrics, eval_metrics)
 
     finally:
         # Always release the environments and flush/close the logger
